@@ -134,3 +134,37 @@ export function highlightTargetWord(sentence: string, target: string): Highlight
 
   return segments.length > 0 ? segments : [{ text: sentence, highlighted: false }];
 }
+
+/**
+ * Returns true if any native modal `<dialog open>` is currently displayed.
+ * Used to isolate background keyboard shortcuts from active modals.
+ */
+export function hasOpenDialog(): boolean {
+  return typeof document !== 'undefined' && Boolean(document.querySelector('dialog[open]'));
+}
+
+/**
+ * Returns true when keyboard focus is inside an editable form control or contentEditable region.
+ */
+export function isEditableFocused(): boolean {
+  if (typeof document === 'undefined') return false;
+  const active = document.activeElement as HTMLElement | null;
+  if (!active) return false;
+  const tag = active.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || active.isContentEditable;
+}
+
+/**
+ * Returns true when focus is on another interactive control (button/link/tab)
+ * rather than the allowed card container itself, preventing Space shortcuts from hijacking buttons.
+ */
+export function isOtherInteractiveFocused(allowedElement?: HTMLElement | null): boolean {
+  if (typeof document === 'undefined') return false;
+  const active = document.activeElement as HTMLElement | null;
+  if (!active || active === document.body || active === document.documentElement) return false;
+  if (allowedElement && active === allowedElement) return false;
+  const tag = active.tagName;
+  if (tag === 'BUTTON' || tag === 'A' || tag === 'SUMMARY') return true;
+  const role = active.getAttribute('role');
+  return role === 'button' || role === 'link' || role === 'menuitem' || role === 'tab';
+}

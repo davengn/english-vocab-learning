@@ -98,12 +98,24 @@ export function PracticePage() {
 
   // Read URL initial params
   const urlTab = searchParams.get('tab');
+  const urlMode = searchParams.get('mode');
+  const urlSource = searchParams.get('source');
+  const urlCollectionId = searchParams.get('collectionId') ?? '';
+  const urlSessionId = searchParams.get('sessionId') ?? '';
+  const urlVocabId = searchParams.get('vocabId') ?? '';
+  const urlTopicId = searchParams.get('topicId') ?? '';
+  const urlSetId = searchParams.get('setId') ?? '';
+  const urlCategoryId = searchParams.get('categoryId') ?? '';
+
   const initialTab: PracticeTab =
     urlTab === 'vocab' || urlTab === 'grammar' || urlTab === 'builder' || urlTab === 'history'
       ? urlTab
-      : 'vocab';
+      : urlTopicId || urlSetId || urlCategoryId
+        ? 'grammar'
+        : 'vocab';
 
   const [activeTab, setActiveTab] = useState<PracticeTab>(initialTab);
+  const prevSearchRef = useRef<string>(searchParams.toString());
 
   // Active Runner States
   const [activeVocabSession, setActiveVocabSession] = useState<{
@@ -119,12 +131,6 @@ export function PracticePage() {
   } | null>(null);
 
   // Vocab Config State
-  const urlMode = searchParams.get('mode');
-  const urlSource = searchParams.get('source');
-  const urlCollectionId = searchParams.get('collectionId') ?? '';
-  const urlSessionId = searchParams.get('sessionId') ?? '';
-  const urlVocabId = searchParams.get('vocabId') ?? '';
-
   const [vocabMode, setVocabMode] = useState<VocabPracticeMode>(() =>
     urlMode && (VOCAB_PRACTICE_MODES as readonly string[]).includes(urlMode)
       ? (urlMode as VocabPracticeMode)
@@ -145,14 +151,12 @@ export function PracticePage() {
   const [isGeneratingVocab, setIsGeneratingVocab] = useState(false);
 
   // Grammar Config State
-  const urlTopicId = searchParams.get('topicId') ?? '';
-  const urlSetId = searchParams.get('setId') ?? '';
-
   const [grammarPickMode, setGrammarPickMode] = useState<GrammarPickMode>(() =>
     urlSetId ? 'set' : 'topic',
   );
   const [selectedTopicId, setSelectedTopicId] = useState(urlTopicId);
   const [selectedSetId, setSelectedSetId] = useState(urlSetId);
+  const [selectedCategoryId, setSelectedCategoryId] = useState(urlCategoryId);
   const [selectedQuestionType, setSelectedQuestionType] =
     useState<GrammarQuestionType>('multiple_choice');
   const [grammarLimit, setGrammarLimit] = useState<number>(10);
@@ -172,42 +176,57 @@ export function PracticePage() {
   const [newSetQuestionIds, setNewSetQuestionIds] = useState<string[]>([]);
   const [setToDelete, setSetToDelete] = useState<PracticeSetDto | null>(null);
 
-  // Sync URL params when navigating into /practice with new query string
+  // Sync URL params only when navigating externally with a changed query string
   useEffect(() => {
+    const currentQs = searchParams.toString();
+    if (currentQs === prevSearchRef.current) return;
+    prevSearchRef.current = currentQs;
+
     const t = searchParams.get('tab');
-    if (t === 'vocab' || t === 'grammar' || t === 'builder' || t === 'history') {
-      setActiveTab(t);
-    }
     const m = searchParams.get('mode');
+    const src = searchParams.get('source');
+    const col = searchParams.get('collectionId') ?? '';
+    const sess = searchParams.get('sessionId') ?? '';
+    const vId = searchParams.get('vocabId') ?? '';
+    const tId = searchParams.get('topicId') ?? '';
+    const sId = searchParams.get('setId') ?? '';
+    const cId = searchParams.get('categoryId') ?? '';
+
+    const resolvedTab: PracticeTab =
+      t === 'vocab' || t === 'grammar' || t === 'builder' || t === 'history'
+        ? t
+        : tId || sId || cId
+          ? 'grammar'
+          : 'vocab';
+
+    setActiveVocabSession(null);
+    setActiveGrammarSession(null);
+    setActiveTab(resolvedTab);
+
     if (m && (VOCAB_PRACTICE_MODES as readonly string[]).includes(m)) {
       setVocabMode(m as VocabPracticeMode);
     }
-    const src = searchParams.get('source');
     if (src && ['due', 'weak', 'all', 'collection', 'session'].includes(src)) {
       setVocabSource(src as VocabSource);
+    } else if (col) {
+      setVocabSource('collection');
+    } else if (sess) {
+      setVocabSource('session');
+    } else if (currentQs === '') {
+      setVocabSource('due');
     }
-    const col = searchParams.get('collectionId');
-    if (col) {
-      setSelectedCollectionId(col);
-      if (!src) setVocabSource('collection');
-    }
-    const sess = searchParams.get('sessionId');
-    if (sess) {
-      setSelectedSessionId(sess);
-      if (!src) setVocabSource('session');
-    }
-    const vId = searchParams.get('vocabId');
-    if (vId !== null) setScopedVocabId(vId);
 
-    const tId = searchParams.get('topicId');
-    if (tId !== null) {
-      setSelectedTopicId(tId);
-      setGrammarPickMode('topic');
-    }
-    const sId = searchParams.get('setId');
-    if (sId !== null) {
-      setSelectedSetId(sId);
+    setSelectedCollectionId(col);
+    setSelectedSessionId(sess);
+    setScopedVocabId(vId);
+    setSelectedTopicId(tId);
+    setSelectedSetId(sId);
+    setSelectedCategoryId(cId);
+
+    if (sId) {
       setGrammarPickMode('set');
+    } else if (tId || cId || currentQs === '') {
+      setGrammarPickMode('topic');
     }
   }, [searchParams]);
 
@@ -219,6 +238,10 @@ export function PracticePage() {
   const sessionsQuery = useQuery({
     queryKey: ['sessions'],
     queryFn: () => api.listSessions(),
+  });
+  const grammarCategoriesQuery = useQuery({
+    queryKey: ['grammar-categories'],
+    queryFn: () => api.listGrammarCategories(),
   });
   const grammarTopicsQuery = useQuery({
     queryKey: ['grammar-topics'],
@@ -256,9 +279,26 @@ export function PracticePage() {
 
   const collections = collectionsQuery.data ?? [];
   const sessions = sessionsQuery.data ?? [];
+  const grammarCategories = grammarCategoriesQuery.data ?? [];
   const grammarTopics = grammarTopicsQuery.data ?? [];
   const practiceSets = practiceSetsQuery.data ?? [];
   const allQuestions = allQuestionsQuery.data ?? [];
+
+  const filteredGrammarTopics = useMemo(
+    () =>
+      selectedCategoryId
+        ? grammarTopics.filter((t) => t.categoryId === selectedCategoryId)
+        : grammarTopics,
+    [grammarTopics, selectedCategoryId],
+  );
+  const categoryTopicIds = useMemo(
+    () => new Set(filteredGrammarTopics.map((t) => t.id)),
+    [filteredGrammarTopics],
+  );
+  const selectedCategoryObj = useMemo(
+    () => grammarCategories.find((c) => c.id === selectedCategoryId) ?? null,
+    [grammarCategories, selectedCategoryId],
+  );
 
   // Mutations for Builder
   const deleteQuestionMutation = useMutation({
@@ -322,6 +362,15 @@ export function PracticePage() {
       const targetSess = overrides?.sessionId ?? selectedSessionId;
       const targetVocabId = overrides?.vocabId ?? scopedVocabId;
 
+      if (!targetVocabId && targetSource === 'collection' && !targetCol) {
+        warning('Vui lòng chọn một bộ sưu tập trước khi bắt đầu');
+        return;
+      }
+      if (!targetVocabId && targetSource === 'session' && !targetSess) {
+        warning('Vui lòng chọn một buổi học trước khi bắt đầu');
+        return;
+      }
+
       setIsGeneratingVocab(true);
       try {
         const items = await api.generateVocabQuiz({
@@ -377,10 +426,16 @@ export function PracticePage() {
   );
 
   const startGrammarPractice = useCallback(
-    async (overrides?: { pickMode?: GrammarPickMode; topicId?: string; setId?: string }) => {
+    async (overrides?: {
+      pickMode?: GrammarPickMode;
+      topicId?: string;
+      setId?: string;
+      categoryId?: string;
+    }) => {
       const pick = overrides?.pickMode ?? grammarPickMode;
       const tId = overrides?.topicId ?? selectedTopicId;
       const sId = overrides?.setId ?? selectedSetId;
+      const cId = overrides?.categoryId !== undefined ? overrides.categoryId : selectedCategoryId;
 
       setIsLaunchingGrammar(true);
       try {
@@ -399,11 +454,22 @@ export function PracticePage() {
           questions = await api.listPracticeQuestions({
             grammarTopicId: tId || undefined,
           });
+          if (!tId && cId) {
+            const topicIdsInCat = new Set(
+              grammarTopics.filter((t) => t.categoryId === cId).map((t) => t.id),
+            );
+            questions = questions.filter(
+              (q) => Boolean(q.grammarTopicId && topicIdsInCat.has(q.grammarTopicId)),
+            );
+          }
           const topicObj = grammarTopics.find((t) => t.id === tId);
           const resolvedTopicTitle = topicObj?.title ?? questions[0]?.grammarTopicTitle;
-          title = resolvedTopicTitle
+          const catObj = cId ? grammarCategories.find((cat) => cat.id === cId) : null;
+          title = tId && resolvedTopicTitle
             ? `Ngữ pháp: ${resolvedTopicTitle}`
-            : 'Luyện tập Ngữ pháp tổng hợp';
+            : catObj
+              ? `Danh mục: ${catObj.nameVi || catObj.name}`
+              : 'Luyện tập Ngữ pháp tổng hợp';
         } else {
           questions = await api.listPracticeQuestions({
             questionType: selectedQuestionType,
@@ -432,9 +498,11 @@ export function PracticePage() {
       }
     },
     [
+      grammarCategories,
       grammarLimit,
       grammarPickMode,
       grammarTopics,
+      selectedCategoryId,
       selectedQuestionType,
       selectedSetId,
       selectedTopicId,
@@ -452,6 +520,10 @@ export function PracticePage() {
       return;
     }
 
+    if (urlCategoryId && !urlTopicId && !urlSetId && !grammarTopicsQuery.isSuccess) {
+      return;
+    }
+
     const signature = searchParams.toString();
     if (autoStartHandledRef.current === signature) return;
     autoStartHandledRef.current = signature;
@@ -459,15 +531,27 @@ export function PracticePage() {
     // Strip autostart from URL so refreshing or exiting won't auto-relaunch
     const cleaned = new URLSearchParams(searchParams);
     cleaned.delete('autostart');
+    prevSearchRef.current = cleaned.toString();
     setSearchParams(cleaned, { replace: true });
 
-    if (initialTab === 'grammar') {
+    const effectiveTab: PracticeTab =
+      urlTab === 'vocab' || urlTab === 'grammar' || urlTab === 'builder' || urlTab === 'history'
+        ? urlTab
+        : urlTopicId || urlSetId || urlCategoryId
+          ? 'grammar'
+          : 'vocab';
+
+    if (effectiveTab === 'grammar') {
       if (urlSetId) {
         void startGrammarPractice({ pickMode: 'set', setId: urlSetId });
       } else {
-        void startGrammarPractice({ pickMode: 'topic', topicId: urlTopicId });
+        void startGrammarPractice({
+          pickMode: 'topic',
+          topicId: urlTopicId,
+          categoryId: urlCategoryId,
+        });
       }
-    } else if (initialTab === 'vocab') {
+    } else if (effectiveTab === 'vocab') {
       const m =
         urlMode && (VOCAB_PRACTICE_MODES as readonly string[]).includes(urlMode)
           ? (urlMode as VocabPracticeMode)
@@ -489,16 +573,18 @@ export function PracticePage() {
       });
     }
   }, [
-    initialTab,
+    grammarTopicsQuery.isSuccess,
     searchParams,
     setSearchParams,
     startGrammarPractice,
     startVocabPractice,
+    urlCategoryId,
     urlCollectionId,
     urlMode,
     urlSessionId,
     urlSetId,
     urlSource,
+    urlTab,
     urlTopicId,
     urlVocabId,
     vocabMode,
@@ -511,15 +597,22 @@ export function PracticePage() {
       return found?.questionCount ?? 0;
     }
     if (grammarPickMode === 'topic') {
-      return selectedTopicId
-        ? allQuestions.filter((q) => q.grammarTopicId === selectedTopicId).length
-        : allQuestions.length;
+      if (selectedTopicId) {
+        return allQuestions.filter((q) => q.grammarTopicId === selectedTopicId).length;
+      }
+      if (selectedCategoryId) {
+        return allQuestions.filter((q) => q.grammarTopicId && categoryTopicIds.has(q.grammarTopicId))
+          .length;
+      }
+      return allQuestions.length;
     }
     return allQuestions.filter((q) => q.questionType === selectedQuestionType).length;
   }, [
     allQuestions,
+    categoryTopicIds,
     grammarPickMode,
     practiceSets,
+    selectedCategoryId,
     selectedQuestionType,
     selectedSetId,
     selectedTopicId,
@@ -613,7 +706,28 @@ export function PracticePage() {
     setActiveTab(casted);
     const nextParams = new URLSearchParams(searchParams);
     nextParams.set('tab', casted);
+    prevSearchRef.current = nextParams.toString();
     setSearchParams(nextParams, { replace: true });
+  };
+
+  const clearScopedVocab = () => {
+    setScopedVocabId('');
+    if (searchParams.has('vocabId')) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete('vocabId');
+      prevSearchRef.current = nextParams.toString();
+      setSearchParams(nextParams, { replace: true });
+    }
+  };
+
+  const clearCategoryFilter = () => {
+    setSelectedCategoryId('');
+    if (searchParams.has('categoryId')) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete('categoryId');
+      prevSearchRef.current = nextParams.toString();
+      setSearchParams(nextParams, { replace: true });
+    }
   };
 
   const handleCreateSetSubmit = (e: FormEvent) => {
@@ -658,7 +772,7 @@ export function PracticePage() {
           {scopedVocabId && (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-[8px] border border-[var(--accent-border)] bg-[var(--accent-soft)] px-4 py-2.5 text-[13px] text-[var(--accent)]">
               <span>Đang chọn luyện tập cho 1 từ vựng cụ thể đã liên kết.</span>
-              <Button size="sm" variant="ghost" onClick={() => setScopedVocabId('')}>
+              <Button size="sm" variant="ghost" onClick={clearScopedVocab}>
                 Bỏ chọn từ đơn lẻ
               </Button>
             </div>
@@ -788,6 +902,20 @@ export function PracticePage() {
                 </p>
               </div>
 
+              {selectedCategoryId && grammarPickMode === 'topic' && (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-[8px] border border-[var(--accent-border)] bg-[var(--accent-soft)] px-4 py-2.5 text-[13px] text-[var(--accent)]">
+                  <span>
+                    Đang lọc theo danh mục:{' '}
+                    <strong>
+                      {selectedCategoryObj?.nameVi || selectedCategoryObj?.name || 'Ngữ pháp'}
+                    </strong>
+                  </span>
+                  <Button size="sm" variant="ghost" onClick={clearCategoryFilter}>
+                    Bỏ lọc danh mục
+                  </Button>
+                </div>
+              )}
+
               <div className="grid gap-3 sm:grid-cols-3">
                 {[
                   {
@@ -838,8 +966,10 @@ export function PracticePage() {
                     label="Chủ điểm ngữ pháp"
                     value={selectedTopicId}
                     onChange={(e) => setSelectedTopicId(e.target.value)}
-                    placeholder="Tất cả chủ điểm"
-                    options={grammarTopics.map((t) => ({
+                    placeholder={
+                      selectedCategoryId ? 'Tất cả chủ điểm trong danh mục' : 'Tất cả chủ điểm'
+                    }
+                    options={filteredGrammarTopics.map((t) => ({
                       value: t.id,
                       label: `${t.title}${t.titleVi ? ` (${t.titleVi})` : ''} · ${t.questionCount} câu`,
                     }))}

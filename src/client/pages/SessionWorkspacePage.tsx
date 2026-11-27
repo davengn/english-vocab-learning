@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertCircle,
@@ -48,6 +48,7 @@ import type {
   CefrLevel,
   DuplicateStrategy,
   GrammarDifficulty,
+  SessionDetailDto,
   SessionSourceType,
   SessionVocabularyItemDto,
 } from '@shared/apiTypes';
@@ -98,6 +99,10 @@ export function SessionWorkspacePage() {
   const [autosaveState, setAutosaveState] = useState<AutosaveState>('idle');
   const hydratedSessionIdRef = useRef<string | null>(null);
   const lastSavedRef = useRef<SessionMetaSnapshot | null>(null);
+  const latestMetaRef = useRef<SessionMetaSnapshot>(meta);
+  latestMetaRef.current = meta;
+  const autosaveTimerRef = useRef<number | null>(null);
+  const pendingMetaPromiseRef = useRef<Promise<unknown> | null>(null);
 
   // Quick Add vocab bar
   const wordInputRef = useRef<HTMLInputElement>(null);
@@ -203,15 +208,36 @@ export function SessionWorkspacePage() {
     }
   }, [grammarCategoriesQuery.data, newGramCategoryId]);
 
+  const isMetaDirty = useCallback(
+    (candidate: SessionMetaSnapshot, saved: SessionMetaSnapshot | null): boolean => {
+      if (!saved) return false;
+      return (
+        candidate.title !== saved.title ||
+        candidate.learningDate !== saved.learningDate ||
+        candidate.sourceType !== saved.sourceType ||
+        candidate.learningType !== saved.learningType ||
+        candidate.generalNotes !== saved.generalNotes
+      );
+    },
+    [],
+  );
+
+  const isMetaValid = useCallback((candidate: SessionMetaSnapshot): boolean => {
+    return Boolean(candidate.title.trim()) && /^\d{4}-\d{2}-\d{2}$/.test(candidate.learningDate);
+  }, []);
+
   const updateMetaMutation = useMutation({
-    mutationFn: (payload: SessionMetaSnapshot) =>
-      api.updateSession(id, {
+    mutationFn: (payload: SessionMetaSnapshot) => {
+      const promise = api.updateSession(id, {
         title: payload.title.trim(),
         learningDate: payload.learningDate,
         sourceType: payload.sourceType,
         learningType: payload.learningType.trim() || 'Tổng hợp',
         generalNotes: payload.generalNotes,
-      }),
+      });
+      pendingMetaPromiseRef.current = promise;
+      return promise;
+    },
     onSuccess: (updated) => {
       lastSavedRef.current = {
         title: updated.title,
@@ -221,39 +247,102 @@ export function SessionWorkspacePage() {
         generalNotes: updated.generalNotes,
       };
       setAutosaveState('saved');
-      queryClient.setQueryData(['session', id], updated);
+      queryClient.setQueryData(
+        ['session', id],
+        (prev: SessionDetailDto | undefined) =>
+          prev && prev.status === 'completed' && updated.status !== 'completed'
+            ? { ...updated, status: 'completed', completedAt: prev.completedAt ?? updated.completedAt }
+            : updated,
+      );
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
     },
     onError: () => {
       setAutosaveState('error');
     },
+    onSettled: () => {
+      pendingMetaPromiseRef.current = null;
+    },
   });
+
+  const flushPendingMetaSave = useCallback(async () => {
+    if (autosaveTimerRef.current !== null) {
+      window.clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+    if (pendingMetaPromiseRef.current) {
+      await pendingMetaPromiseRef.current.catch(() => undefined);
+    }
+    const snapshot = latestMetaRef.current;
+    if (id && isMetaDirty(snapshot, lastSavedRef.current) && isMetaValid(snapshot)) {
+      await updateMetaMutation.mutateAsync(snapshot);
+    }
+  }, [id, isMetaDirty, isMetaValid, updateMetaMutation]);
 
   // Debounced autosave when meta changes
   useEffect(() => {
     if (!id || !lastSavedRef.current) return;
-    const prev = lastSavedRef.current;
-    const changed =
-      meta.title !== prev.title ||
-      meta.learningDate !== prev.learningDate ||
-      meta.sourceType !== prev.sourceType ||
-      meta.learningType !== prev.learningType ||
-      meta.generalNotes !== prev.generalNotes;
-
-    if (!changed) return;
-
-    if (!meta.title.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(meta.learningDate)) {
-      return;
-    }
+    if (!isMetaDirty(meta, lastSavedRef.current)) return;
+    if (!isMetaValid(meta)) return;
 
     setAutosaveState('saving');
+    if (autosaveTimerRef.current !== null) {
+      window.clearTimeout(autosaveTimerRef.current);
+    }
     const timer = window.setTimeout(() => {
-      updateMetaMutation.mutate(meta);
+      autosaveTimerRef.current = null;
+      updateMetaMutation.mutate(latestMetaRef.current);
     }, 600);
+    autosaveTimerRef.current = timer;
 
-    return () => window.clearTimeout(timer);
+    return () => {
+      if (autosaveTimerRef.current === timer) {
+        window.clearTimeout(timer);
+        autosaveTimerRef.current = null;
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meta, id]);
+
+  // Reset per-session UI and flush unsaved edits when switching routes or unmounting
+  useEffect(() => {
+    setEditingVocabId(null);
+    setCompleteModalOpen(false);
+    setBulkOpen(false);
+    setImportOpen(false);
+    setSelectedTopicId('');
+    setExistingGrammarNote('');
+    setSelectedExistingVocabId('');
+    setExistingVocabSearch('');
+
+    return () => {
+      if (autosaveTimerRef.current !== null) {
+        window.clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
+      const snapshot = latestMetaRef.current;
+      if (
+        id &&
+        hydratedSessionIdRef.current === id &&
+        isMetaDirty(snapshot, lastSavedRef.current) &&
+        isMetaValid(snapshot)
+      ) {
+        lastSavedRef.current = snapshot;
+        void api
+          .updateSession(id, {
+            title: snapshot.title.trim(),
+            learningDate: snapshot.learningDate,
+            sourceType: snapshot.sourceType,
+            learningType: snapshot.learningType.trim() || 'Tổng hợp',
+            generalNotes: snapshot.generalNotes,
+          })
+          .then(() => {
+            queryClient.invalidateQueries({ queryKey: ['session', id] });
+            queryClient.invalidateQueries({ queryKey: ['sessions'] });
+          })
+          .catch(() => undefined);
+      }
+    };
+  }, [id, isMetaDirty, isMetaValid, queryClient]);
 
   // Quick add vocab mutation
   const quickAddVocabMutation = useMutation({
@@ -498,7 +587,10 @@ export function SessionWorkspacePage() {
   });
 
   const completeSessionMutation = useMutation({
-    mutationFn: () => api.completeSession(id),
+    mutationFn: async () => {
+      await flushPendingMetaSave();
+      return api.completeSession(id);
+    },
     onSuccess: (updated) => {
       queryClient.setQueryData(['session', id], updated);
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
@@ -704,7 +796,10 @@ export function SessionWorkspacePage() {
               variant="primary"
               size="md"
               leftIcon={<CheckCircle2 className="h-4 w-4" aria-hidden="true" />}
-              onClick={() => setCompleteModalOpen(true)}
+              onClick={() => {
+                void flushPendingMetaSave();
+                setCompleteModalOpen(true);
+              }}
             >
               Hoàn thành buổi học
             </Button>

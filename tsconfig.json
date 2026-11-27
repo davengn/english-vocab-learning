@@ -18,5 +18,5 @@
       "@server/*": ["src/server/*"]
     }
   },
-  "include": ["src", "tests", "vite.config.ts", "drizzle.config.ts"]
+  "include": ["src", "tests", "api", "netlify", "vite.config.ts", "drizzle.config.ts"]
 }

@@ -570,7 +570,7 @@ export function DashboardPage({
                           {cat.avgAccuracy}%
                         </Badge>
                         <Link
-                          to="/practice"
+                          to={`/practice?tab=grammar&categoryId=${cat.categoryId}`}
                           className="text-[12px] font-medium text-[var(--accent)] hover:underline"
                         >
                           Luyện
@@ -688,7 +688,7 @@ export function DashboardPage({
                 Lỗi sai gần đây
               </CardTitle>
               <Link
-                to="/practice"
+                to="/review#mistake-bank"
                 className="text-[13px] font-medium text-[var(--accent)] hover:underline"
               >
                 Luyện sửa lỗi →

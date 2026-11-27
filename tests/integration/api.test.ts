@@ -1208,4 +1208,323 @@ describe('English Learning OS V1 — End-to-End API & Persistence Integration Te
     },
     30_000,
   );
+
+  it('filters CSV export accurately across every supported VocabularyPage filter param', async () => {
+    const { app } = await setupInMemoryContext();
+
+    const colRes = await requestJson<{ id: string }>(app, '/api/collections', {
+      method: 'POST',
+      body: { name: 'CSV Export Test Col' },
+    });
+    expect(colRes.status).toBe(201);
+
+    const tagRes = await requestJson<{ id: string }>(app, '/api/tags', {
+      method: 'POST',
+      body: { name: 'csv-filter-tag' },
+    });
+    expect(tagRes.status).toBe(201);
+
+    const matchWord = await requestJson<VocabularyDetailDto>(app, '/api/vocabulary', {
+      method: 'POST',
+      body: {
+        word: 'articulate_csv_match',
+        vietnameseMeaning: 'diễn đạt mạch lạc',
+        partOfSpeech: 'verb',
+        cefrLevel: 'C1',
+        isFavorite: true,
+        collectionIds: [colRes.data.id],
+        tagNames: ['csv-filter-tag'],
+      },
+    });
+    expect(matchWord.status).toBe(201);
+    expect(matchWord.data.tags[0]?.id).toBe(tagRes.data.id);
+
+    // Transition word status from 'new' -> 'learning' via real practice attempt
+    const pracSessRes = await requestJson<PracticeSessionDto>(app, '/api/practice/sessions', {
+      method: 'POST',
+      body: {
+        domain: 'vocabulary',
+        mode: 'flashcard',
+        title: 'CSV Status Transition Session',
+        totalItems: 1,
+      },
+    });
+    expect(pracSessRes.status).toBe(201);
+
+    const attemptRes = await requestJson<PracticeAttemptResponseDto>(
+      app,
+      `/api/practice/sessions/${pracSessRes.data.id}/attempts`,
+      {
+        method: 'POST',
+        body: {
+          vocabularyId: matchWord.data.id,
+          mode: 'flashcard',
+          direction: 'en_to_vi',
+          userAnswer: 'Đang học',
+          expectedAnswer: 'diễn đạt mạch lạc',
+          isCorrect: false,
+          selfRating: 1,
+        },
+      },
+    );
+    expect(attemptRes.status).toBe(201);
+
+    const refreshedWordRes = await requestJson<VocabularyDetailDto>(
+      app,
+      `/api/vocabulary/${matchWord.data.id}`,
+    );
+    expect(refreshedWordRes.status).toBe(200);
+    expect(refreshedWordRes.data.status).toBe('learning');
+
+    const incompleteWord = await requestJson<VocabularyDetailDto>(app, '/api/vocabulary', {
+      method: 'POST',
+      body: {
+        word: 'ephemeral_csv_incomplete',
+        vietnameseMeaning: '',
+        partOfSpeech: 'adjective',
+        cefrLevel: 'C2',
+        status: 'new',
+        isFavorite: false,
+      },
+    });
+    expect(incompleteWord.status).toBe(201);
+    expect(incompleteWord.data.isIncomplete).toBe(true);
+
+    // 1. Combined filters: collection + tag + cefr + pos + status + favorite + search
+    const filteredCsvRes = await app.request(
+      `/api/vocabulary/export.csv?collectionId=${colRes.data.id}&tagId=${tagRes.data.id}&cefrLevel=C1&partOfSpeech=verb&status=learning&favorite=true&search=m%E1%BA%A1ch%20l%E1%BA%A1c`,
+    );
+    expect(filteredCsvRes.status).toBe(200);
+    expect(filteredCsvRes.headers.get('content-type')).toContain('text/csv');
+    const filteredCsvBytes = new Uint8Array(await filteredCsvRes.arrayBuffer());
+    expect(filteredCsvBytes[0]).toBe(0xef);
+    expect(filteredCsvBytes[1]).toBe(0xbb);
+    expect(filteredCsvBytes[2]).toBe(0xbf);
+    const filteredCsvText = new TextDecoder('utf-8', { ignoreBOM: true }).decode(filteredCsvBytes);
+    expect(filteredCsvText.startsWith('\uFEFF')).toBe(true);
+    expect(filteredCsvText).toContain('articulate_csv_match');
+    expect(filteredCsvText).not.toContain('ephemeral_csv_incomplete');
+
+    // 2. Incomplete filter
+    const incompleteCsvRes = await app.request(
+      '/api/vocabulary/export.csv?incomplete=true&search=ephemeral_csv_incomplete',
+    );
+    expect(incompleteCsvRes.status).toBe(200);
+    const incompleteCsvText = await incompleteCsvRes.text();
+    expect(incompleteCsvText).toContain('ephemeral_csv_incomplete');
+    expect(incompleteCsvText).not.toContain('articulate_csv_match');
+  });
+
+  it('prevents source=collection/session fallback leaks and supports mistakeIds & >100 practice limits', async () => {
+    const { app } = await setupInMemoryContext();
+
+    // Missing collectionId or sessionId must return empty array instead of whole library
+    const missingColRes = await requestJson<GeneratedVocabQuizItemDto[]>(
+      app,
+      '/api/practice/vocabulary/generate',
+      {
+        method: 'POST',
+        body: { mode: 'flashcard', source: 'collection', limit: 10 },
+      },
+    );
+    expect(missingColRes.status).toBe(200);
+    expect(missingColRes.data).toEqual([]);
+
+    const missingSessRes = await requestJson<GeneratedVocabQuizItemDto[]>(
+      app,
+      '/api/practice/vocabulary/generate',
+      {
+        method: 'POST',
+        body: { mode: 'flashcard', source: 'session', limit: 10 },
+      },
+    );
+    expect(missingSessRes.status).toBe(200);
+    expect(missingSessRes.data).toEqual([]);
+
+    // Limit > 100 (up to 350 for daily review) is accepted cleanly
+    const listRes = await requestJson<VocabularyListItemDto[]>(app, '/api/vocabulary');
+    expect(listRes.data.length).toBeGreaterThan(0);
+    const highLimitRes = await requestJson<GeneratedVocabQuizItemDto[]>(
+      app,
+      '/api/practice/vocabulary/generate',
+      {
+        method: 'POST',
+        body: {
+          mode: 'en_to_vi',
+          vocabularyIds: listRes.data.slice(0, 3).map((v) => v.id),
+          limit: 150,
+        },
+      },
+    );
+    expect(highLimitRes.status).toBe(200);
+    expect(highLimitRes.data.length).toBe(3);
+
+    // Filtered Mistake Bank practice-set creation honors mistakeIds
+    const m1 = await requestJson<MistakeDto>(app, '/api/mistakes', {
+      method: 'POST',
+      body: {
+        category: 'prepositions',
+        originalInput: 'She is good in math.',
+        correctedVersion: 'She is good at math.',
+        explanationVi: 'Dùng good at thay vì good in.',
+      },
+    });
+    const m2 = await requestJson<MistakeDto>(app, '/api/mistakes', {
+      method: 'POST',
+      body: {
+        category: 'tense',
+        originalInput: 'I go to school yesterday.',
+        correctedVersion: 'I went to school yesterday.',
+        explanationVi: 'Quá khứ đơn với yesterday.',
+      },
+    });
+    expect(m1.status).toBe(201);
+    expect(m2.status).toBe(201);
+
+    const targetedSetRes = await requestJson<PracticeSetDto>(
+      app,
+      '/api/mistakes/create-practice-set',
+      {
+        method: 'POST',
+        body: { mistakeIds: [m1.data.id] },
+      },
+    );
+    expect(targetedSetRes.status).toBe(201);
+    expect(targetedSetRes.data.questions).toHaveLength(1);
+    expect(targetedSetRes.data.questions![0].prompt).toBe('She is good in math.');
+  });
+
+  it('preserves session metadata edits flushed immediately before session completion', async () => {
+    const { app } = await setupInMemoryContext();
+
+    const createdRes = await requestJson<SessionDetailDto>(app, '/api/sessions', {
+      method: 'POST',
+      body: {
+        title: 'Initial Draft Session',
+        learningDate: todayIsoDate(),
+        sourceType: 'english_class',
+        learningType: 'Từ vựng',
+      },
+    });
+    expect(createdRes.status).toBe(201);
+
+    const addVocabRes = await requestJson<{ added: boolean }>(
+      app,
+      `/api/sessions/${createdRes.data.id}/vocabulary`,
+      {
+        method: 'POST',
+        body: {
+          word: 'resilient_flush_test',
+          vietnameseMeaning: 'kiên cường',
+        },
+      },
+    );
+    expect(addVocabRes.status).toBe(201);
+
+    // Simulate flushed PATCH followed immediately by complete
+    const patchedRes = await requestJson<SessionDetailDto>(
+      app,
+      `/api/sessions/${createdRes.data.id}`,
+      {
+        method: 'PATCH',
+        body: {
+          title: 'Updated Before Complete',
+          generalNotes: 'Ghi chú vừa lưu trước khi bấm hoàn thành',
+        },
+      },
+    );
+    expect(patchedRes.status).toBe(200);
+
+    const completedRes = await requestJson<SessionDetailDto>(
+      app,
+      `/api/sessions/${createdRes.data.id}/complete`,
+      { method: 'POST' },
+    );
+    expect(completedRes.status).toBe(200);
+    expect(completedRes.data.status).toBe('completed');
+    expect(completedRes.data.title).toBe('Updated Before Complete');
+    expect(completedRes.data.generalNotes).toBe('Ghi chú vừa lưu trước khi bấm hoàn thành');
+  });
+
+  it(
+    'serves health (with driver), multipart CSV import, and BOM CSV export via Vercel and Netlify serverless entrypoints',
+    async () => {
+      const prevDataDir = process.env.DATA_DIR;
+      const tmpVercelDir = fs.mkdtempSync(path.join(os.tmpdir(), 'eng-os-vercel-'));
+      const tmpNetlifyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'eng-os-netlify-'));
+
+      try {
+        // Test Vercel entrypoint
+        process.env.DATA_DIR = path.join(tmpVercelDir, 'pgdata');
+        const vercelEntry = await import('../../api/[...route].js');
+        const vercelHealthRes = await vercelEntry.GET(
+          new Request('http://localhost/api/health'),
+        );
+        expect(vercelHealthRes.status).toBe(200);
+        const vercelHealth = (await vercelHealthRes.json()) as {
+          ok: boolean;
+          status: string;
+          driver: string;
+        };
+        expect(vercelHealth.ok).toBe(true);
+        expect(vercelHealth.status).toBe('healthy');
+        expect(vercelHealth.driver).toBe('pglite');
+
+        const vercelCsvRes = await vercelEntry.GET(
+          new Request('http://localhost/api/vocabulary/export.csv'),
+        );
+        expect(vercelCsvRes.status).toBe(200);
+        expect(vercelCsvRes.headers.get('content-type')).toContain('text/csv');
+        const vercelCsvBytes = new Uint8Array(await vercelCsvRes.arrayBuffer());
+        expect(vercelCsvBytes[0]).toBe(0xef);
+        expect(vercelCsvBytes[1]).toBe(0xbb);
+        expect(vercelCsvBytes[2]).toBe(0xbf);
+        const vercelCsvText = new TextDecoder('utf-8', { ignoreBOM: true }).decode(vercelCsvBytes);
+        expect(vercelCsvText.startsWith('\uFEFF')).toBe(true);
+
+        // Test Netlify entrypoint (including prefix rewriting and multipart FormData upload)
+        process.env.DATA_DIR = path.join(tmpNetlifyDir, 'pgdata');
+        const netlifyEntry = await import('../../netlify/functions/api.js');
+        const netlifyHealthRes = await netlifyEntry.default(
+          new Request('http://localhost/.netlify/functions/api/health'),
+        );
+        expect(netlifyHealthRes.status).toBe(200);
+        const netlifyHealth = (await netlifyHealthRes.json()) as {
+          ok: boolean;
+          status: string;
+          driver: string;
+        };
+        expect(netlifyHealth.ok).toBe(true);
+        expect(netlifyHealth.status).toBe('healthy');
+        expect(netlifyHealth.driver).toBe('pglite');
+
+        const formData = new FormData();
+        const csvBlob = new Blob(
+          ['word,vietnamese_meaning,cefr_level\nmeticulous,tỉ mỉ,C1\n'],
+          { type: 'text/csv' },
+        );
+        formData.append('file', csvBlob, 'sample.csv');
+
+        const netlifyImportRes = await netlifyEntry.default(
+          new Request('http://localhost/.netlify/functions/api/vocabulary/import/parse', {
+            method: 'POST',
+            body: formData,
+          }),
+        );
+        expect(netlifyImportRes.status).toBe(200);
+        const parsedImport = (await netlifyImportRes.json()) as ImportParseResponseDto;
+        expect(parsedImport.totalRows).toBe(1);
+        expect(parsedImport.previewRows[0].word).toBe('meticulous');
+      } finally {
+        if (prevDataDir === undefined) {
+          delete process.env.DATA_DIR;
+        } else {
+          process.env.DATA_DIR = prevDataDir;
+        }
+        fs.rmSync(tmpVercelDir, { recursive: true, force: true });
+        fs.rmSync(tmpNetlifyDir, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
 });

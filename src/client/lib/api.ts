@@ -500,6 +500,8 @@ export const api = {
     id: string,
     body: Partial<{
       category: MistakeCategory;
+      vocabularyId: string | null;
+      grammarTopicId: string | null;
       originalInput: string;
       correctedVersion: string;
       explanationVi: string;

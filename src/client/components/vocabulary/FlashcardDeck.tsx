@@ -22,7 +22,14 @@ import { Link } from 'react-router-dom';
 import type { SkillDirection, VocabularyListItemDto } from '@shared/apiTypes';
 import { PART_OF_SPEECH_OPTIONS, VOCAB_STATUS_LABELS } from '@shared/schemas';
 import { api } from '@client/lib/api';
-import { cn, highlightTargetWord } from '@client/lib/utils';
+import { isImeComposing } from '@client/lib/ime';
+import {
+  cn,
+  hasOpenDialog,
+  highlightTargetWord,
+  isEditableFocused,
+  isOtherInteractiveFocused,
+} from '@client/lib/utils';
 import { Badge } from '@client/components/ui/Badge';
 import { Button } from '@client/components/ui/Button';
 import { Card, CardContent } from '@client/components/ui/Card';
@@ -72,18 +79,6 @@ function shuffleItems<T>(list: T[]): T[] {
   return copy;
 }
 
-function isEditableFocused(): boolean {
-  const active = document.activeElement;
-  if (!active) return false;
-  const tag = active.tagName;
-  return (
-    tag === 'INPUT' ||
-    tag === 'TEXTAREA' ||
-    tag === 'SELECT' ||
-    (active as HTMLElement).isContentEditable
-  );
-}
-
 /**
  * Quizlet-style interactive 3D flashcard deck with vertical rotateX flip,
  * Still Learning / Know sorting, Undo, Shuffle, Autoplay, Hint, and SM-2 sync.
@@ -120,6 +115,8 @@ export function FlashcardDeck({
   const cardStartRef = useRef<number>(Date.now());
   const roundStartRef = useRef<number>(Date.now());
   const sessionCompletedRef = useRef(false);
+  const roundRevisionRef = useRef(0);
+  const cardButtonRef = useRef<HTMLDivElement | null>(null);
 
   const itemsById = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
   const itemsSignature = useMemo(() => items.map((i) => i.id).join('|'), [items]);
@@ -140,6 +137,7 @@ export function FlashcardDeck({
     sessionIdRef.current = null;
     sessionInitPromiseRef.current = null;
     sessionCompletedRef.current = false;
+    roundRevisionRef.current += 1;
     cardStartRef.current = Date.now();
     roundStartRef.current = Date.now();
   }, [itemsSignature]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -184,11 +182,14 @@ export function FlashcardDeck({
 
   const finalizeDbSession = useCallback(
     async (finalKnownCount: number, totalCompleted: number) => {
-      if (!sessionIdRef.current || sessionCompletedRef.current) return;
+      const sid =
+        sessionIdRef.current ??
+        (sessionInitPromiseRef.current ? await sessionInitPromiseRef.current : null);
+      if (!sid || sessionCompletedRef.current) return;
       sessionCompletedRef.current = true;
       const durationSeconds = Math.max(1, Math.round((Date.now() - roundStartRef.current) / 1000));
       try {
-        await api.completePracticeSession(sessionIdRef.current, {
+        await api.completePracticeSession(sid, {
           durationSeconds,
           completedItems: totalCompleted,
           correctCount: finalKnownCount,
@@ -198,7 +199,7 @@ export function FlashcardDeck({
         queryClient.invalidateQueries({ queryKey: ['analytics'] });
         queryClient.invalidateQueries({ queryKey: ['practice-history'] });
       } catch {
-        // non-blocking
+        sessionCompletedRef.current = false;
       }
     },
     [queryClient],
@@ -236,23 +237,29 @@ export function FlashcardDeck({
       const rating: 1 | 2 | 3 | 4 = explicitRating ?? (outcome === 'known' ? 3 : 1);
       const isCorrect = outcome === 'known';
       const responseTimeMs = Math.max(0, Date.now() - cardStartRef.current);
+      const isLastCard = currentIndex + 1 >= deckCards.length;
+      const opRevision = roundRevisionRef.current;
 
       // Persist SM-2 rating asynchronously without blocking card snap
       void (async () => {
         try {
           const sid = await ensurePracticeSession();
-          if (!sid) return;
-          await api.recordPracticeAttempt(sid, {
-            vocabularyId: currentCard.id,
-            mode: 'flashcard',
-            direction,
-            userAnswer: isCorrect ? 'Đã thuộc' : 'Đang học',
-            expectedAnswer:
-              direction === 'en_to_vi' ? currentCard.vietnameseMeaning : currentCard.word,
-            isCorrect,
-            selfRating: rating,
-            responseTimeMs,
-          });
+          if (sid) {
+            await api.recordPracticeAttempt(sid, {
+              vocabularyId: currentCard.id,
+              mode: 'flashcard',
+              direction,
+              userAnswer: isCorrect ? 'Đã thuộc' : 'Đang học',
+              expectedAnswer:
+                direction === 'en_to_vi' ? currentCard.vietnameseMeaning : currentCard.word,
+              isCorrect,
+              selfRating: rating,
+              responseTimeMs,
+            });
+          }
+          if (isLastCard && roundRevisionRef.current === opRevision) {
+            await finalizeDbSession(nextKnown.size, deckCards.length);
+          }
         } catch (err) {
           showError(
             'Không thể lưu tiến độ thẻ vào lịch ôn tập',
@@ -261,10 +268,9 @@ export function FlashcardDeck({
         }
       })();
 
-      if (currentIndex + 1 >= deckCards.length) {
+      if (isLastCard) {
         setRoundComplete(true);
         setIsFlipped(false);
-        void finalizeDbSession(nextKnown.size, deckCards.length);
       } else {
         advanceTo(currentIndex + 1);
       }
@@ -323,6 +329,8 @@ export function FlashcardDeck({
     setIsFlipped(false);
     setShowHint(false);
     setCurrentIndex(last.index);
+    sessionCompletedRef.current = false;
+    roundRevisionRef.current += 1;
     cardStartRef.current = Date.now();
   }, [history]);
 
@@ -344,6 +352,12 @@ export function FlashcardDeck({
     setLearningIds(new Set());
     setHistory([]);
     setRoundComplete(false);
+    sessionIdRef.current = null;
+    sessionInitPromiseRef.current = null;
+    sessionCompletedRef.current = false;
+    roundRevisionRef.current += 1;
+    cardStartRef.current = Date.now();
+    roundStartRef.current = Date.now();
   }, [deckCards, isShuffled, items]);
 
   const startSubsetRound = useCallback(
@@ -366,6 +380,7 @@ export function FlashcardDeck({
       sessionIdRef.current = null;
       sessionInitPromiseRef.current = null;
       sessionCompletedRef.current = false;
+      roundRevisionRef.current += 1;
       cardStartRef.current = Date.now();
       roundStartRef.current = Date.now();
     },
@@ -392,7 +407,9 @@ export function FlashcardDeck({
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.isComposing || e.keyCode === 229) return;
+      if (hasOpenDialog()) return;
       if (isEditableFocused()) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
 
       if (e.key === 'Escape' && focusMode) {
         e.preventDefault();
@@ -400,9 +417,16 @@ export function FlashcardDeck({
         return;
       }
 
+      if (e.key.toLowerCase() === 'z' && history.length > 0) {
+        e.preventDefault();
+        handleUndo();
+        return;
+      }
+
       if (roundComplete || !currentCard) return;
 
       if (e.code === 'Space') {
+        if (isOtherInteractiveFocused(cardButtonRef.current)) return;
         e.preventDefault();
         setAutoplay(false);
         setIsFlipped((v) => !v);
@@ -418,12 +442,6 @@ export function FlashcardDeck({
       if (e.key.toLowerCase() === 's') {
         e.preventDefault();
         onToggleFavorite(currentCard);
-        return;
-      }
-
-      if (e.key.toLowerCase() === 'z' && history.length > 0) {
-        e.preventDefault();
-        handleUndo();
         return;
       }
 
@@ -537,12 +555,16 @@ export function FlashcardDeck({
 
             <div>
               <h2 className="text-[22px] font-semibold text-[var(--ink-primary)]">
-                {learningIds.size === 0
-                  ? 'Tuyệt vời! Bạn đã nắm hết các thẻ trong lượt này'
-                  : `Hoàn thành lượt học · Còn ${learningIds.size} thẻ cần ôn tiếp`}
+                {!trackProgress
+                  ? 'Hoàn thành lượt xem thẻ'
+                  : learningIds.size === 0
+                    ? 'Tuyệt vời! Bạn đã nắm hết các thẻ trong lượt này'
+                    : `Hoàn thành lượt học · Còn ${learningIds.size} thẻ cần ôn tiếp`}
               </h2>
               <p className="mt-1 text-[13.5px] text-[var(--ink-secondary)]">
-                Kết quả đã được đồng bộ vào lịch ôn tập ngắt quãng SM-2 hai chiều.
+                {trackProgress
+                  ? 'Kết quả đã được đồng bộ vào lịch ôn tập ngắt quãng SM-2 hai chiều.'
+                  : 'Bạn đã xem hết tất cả các thẻ trong lượt này (chế độ xem tự do, không ghi đè lịch SM-2).'}
               </p>
             </div>
 
@@ -600,6 +622,7 @@ export function FlashcardDeck({
           {/* 3D Flip Card Stage */}
           <div className="flashcard-scene">
             <div
+              ref={cardButtonRef}
               role="button"
               tabIndex={0}
               aria-pressed={isFlipped}
@@ -608,11 +631,14 @@ export function FlashcardDeck({
                   ? `Mặt sau của thẻ ${currentCard.word}. Nhấn để lật lại mặt trước`
                   : `Mặt trước của thẻ ${currentCard.word}. Nhấn để lật xem đáp án`
               }
-              onClick={() => {
+              onClick={(e) => {
+                if ((e.target as HTMLElement).closest('button, a')) return;
                 setAutoplay(false);
                 setIsFlipped((v) => !v);
               }}
               onKeyDown={(e) => {
+                if (isImeComposing(e)) return;
+                if (e.target !== e.currentTarget) return;
                 if (e.key === 'Enter') {
                   e.preventDefault();
                   setAutoplay(false);

@@ -626,7 +626,7 @@ export function AnalyticsPage() {
                       Xem bài học
                     </Link>
                     <Link
-                      to="/practice?tab=grammar"
+                      to={`/practice?tab=grammar&categoryId=${cat.categoryId}`}
                       className="font-medium text-[var(--accent)] hover:underline"
                     >
                       Luyện tập →

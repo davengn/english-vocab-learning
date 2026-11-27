@@ -24,7 +24,7 @@ import {
 } from '@shared/schemas';
 import { api } from '@client/lib/api';
 import { isImeComposing, onImeSafeEnter } from '@client/lib/ime';
-import { cn } from '@client/lib/utils';
+import { cn, hasOpenDialog, isEditableFocused } from '@client/lib/utils';
 import { Badge } from '@client/components/ui/Badge';
 import { Button } from '@client/components/ui/Button';
 import { Card, CardContent } from '@client/components/ui/Card';
@@ -115,18 +115,6 @@ function formatDuration(totalSeconds: number): string {
   const mins = Math.floor(totalSeconds / 60);
   const secs = totalSeconds % 60;
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-}
-
-function isEditableFocused(): boolean {
-  const active = document.activeElement;
-  if (!active) return false;
-  const tag = active.tagName;
-  return (
-    tag === 'INPUT' ||
-    tag === 'TEXTAREA' ||
-    tag === 'SELECT' ||
-    (active as HTMLElement).isContentEditable
-  );
 }
 
 /**
@@ -424,7 +412,9 @@ export function GrammarPracticeRunner({
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.isComposing || e.keyCode === 229) return;
+      if (hasOpenDialog()) return;
       if (isEditableFocused()) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (['1', '2', '3', '4'].includes(e.key)) {
         const idx = Number(e.key) - 1;
         if (currentQuestion.options[idx]) {
@@ -979,6 +969,7 @@ export function GrammarPracticeRunner({
                       size="sm"
                       variant={!isCurrentCorrect ? 'secondary' : 'ghost'}
                       leftIcon={<BookmarkPlus className="h-3.5 w-3.5" aria-hidden="true" />}
+                      disabled={isSubmittingAttempt}
                       onClick={() => setMistakeDrawerOpen((v) => !v)}
                     >
                       Lưu vào Ngân hàng lỗi sai
@@ -993,6 +984,7 @@ export function GrammarPracticeRunner({
                 <Button
                   variant="primary"
                   rightIcon={<ArrowRight className="h-4 w-4" aria-hidden="true" />}
+                  disabled={isSubmittingAttempt}
                   onClick={handleNext}
                 >
                   {currentIndex + 1 >= questions.length ? 'Xem tổng kết' : 'Câu tiếp theo'}

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import {
   AlertCircle,
   BookMarked,
@@ -65,6 +65,7 @@ const MISTAKE_STATUS_TONE: Record<MistakeStatus, BadgeTone> = {
  * and 1-click correction practice generation.
  */
 export function DailyReviewPage() {
+  const location = useLocation();
   const queryClient = useQueryClient();
   const { success, warning, error: showError } = useToast();
 
@@ -84,6 +85,7 @@ export function DailyReviewPage() {
   // Target Minutes UI State
   const [customMinutesMode, setCustomMinutesMode] = useState(false);
   const [customMinutesInput, setCustomMinutesInput] = useState('25');
+  const [customMinutesError, setCustomMinutesError] = useState<string | null>(null);
 
   // Quick Vocab Review Mode for Step 1 & Step 2
   const [dueVocabMode, setDueVocabMode] = useState<VocabPracticeMode>('flashcard');
@@ -153,8 +155,19 @@ export function DailyReviewPage() {
       const isPreset = (PRESET_MINUTES as readonly number[]).includes(settings.dailyTargetMinutes);
       setCustomMinutesMode(!isPreset);
       setCustomMinutesInput(String(settings.dailyTargetMinutes));
+      setCustomMinutesError(null);
     }
   }, [settings]);
+
+  // Scroll smoothly to #mistake-bank when navigated via hash (e.g. /review#mistake-bank)
+  useEffect(() => {
+    if (location.hash === '#mistake-bank') {
+      const timer = window.setTimeout(() => {
+        document.getElementById('mistake-bank')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 80);
+      return () => window.clearTimeout(timer);
+    }
+  }, [location.hash]);
 
   const updateTargetMutation = useMutation({
     mutationFn: (dailyTargetMinutes: number) =>
@@ -281,7 +294,7 @@ export function DailyReviewPage() {
       const items = await api.generateVocabQuiz({
         mode,
         vocabularyIds: uniqueIds,
-        limit: uniqueIds.length,
+        limit: Math.min(350, uniqueIds.length),
       });
       if (items.length === 0) {
         warning('Không tạo được bài ôn từ vựng.');
@@ -302,14 +315,36 @@ export function DailyReviewPage() {
     }
   };
 
-  const handleCreateAndRunMistakeSet = async () => {
+  const handleCreateAndRunMistakeSet = async (options?: { useFilters?: boolean }) => {
+    const useFilters = options?.useFilters ?? false;
     setIsCreatingMistakeSet(true);
     try {
-      const set = await api.createMistakePracticeSet({
-        category: mistakeCategoryFilter
-          ? (mistakeCategoryFilter as MistakeCategory)
-          : undefined,
-      });
+      let body:
+        | {
+            category?: MistakeCategory;
+            mistakeIds?: string[];
+          }
+        | undefined;
+
+      if (useFilters) {
+        const filteredUnresolved = mistakes.filter((m) => m.status !== 'resolved');
+        if (filteredUnresolved.length === 0) {
+          warning('Không có lỗi sai cần ôn nào phù hợp với bộ lọc hiện tại.');
+          return;
+        }
+        if (mistakeSearch.trim() || mistakeStatusFilter) {
+          body = {
+            ...(mistakeCategoryFilter
+              ? { category: mistakeCategoryFilter as MistakeCategory }
+              : {}),
+            mistakeIds: filteredUnresolved.slice(0, 30).map((m) => m.id),
+          };
+        } else if (mistakeCategoryFilter) {
+          body = { category: mistakeCategoryFilter as MistakeCategory };
+        }
+      }
+
+      const set = await api.createMistakePracticeSet(body);
       queryClient.invalidateQueries({ queryKey: ['practice-sets'] });
       const questions = set.questions ?? [];
       if (questions.length === 0) {
@@ -330,6 +365,52 @@ export function DailyReviewPage() {
       setIsCreatingMistakeSet(false);
     }
   };
+
+  const mistakeVocabOptions = useMemo(() => {
+    const list = vocabPickerQuery.data ?? [];
+    const sliced = list.slice(0, 100);
+    if (formVocabId && !sliced.some((v) => v.id === formVocabId)) {
+      const linked = list.find((v) => v.id === formVocabId);
+      if (linked) {
+        return [linked, ...sliced].map((v) => ({ value: v.id, label: v.word }));
+      }
+    }
+    return sliced.map((v) => ({ value: v.id, label: v.word }));
+  }, [vocabPickerQuery.data, formVocabId]);
+
+  const isMistakeModalDirty = useMemo(() => {
+    if (!editingMistake) {
+      return Boolean(
+        formOriginal.trim() ||
+          formCorrected.trim() ||
+          formExplanation.trim() ||
+          formExample.trim() ||
+          formSourceContext.trim() ||
+          formVocabId ||
+          formGrammarTopicId,
+      );
+    }
+    return (
+      formCategory !== editingMistake.category ||
+      formOriginal !== editingMistake.originalInput ||
+      formCorrected !== editingMistake.correctedVersion ||
+      formExplanation !== editingMistake.explanationVi ||
+      formExample !== editingMistake.correctedExample ||
+      formSourceContext !== editingMistake.sourceContext ||
+      formVocabId !== (editingMistake.vocabularyId ?? '') ||
+      formGrammarTopicId !== (editingMistake.grammarTopicId ?? '')
+    );
+  }, [
+    editingMistake,
+    formCategory,
+    formCorrected,
+    formExample,
+    formExplanation,
+    formGrammarTopicId,
+    formOriginal,
+    formSourceContext,
+    formVocabId,
+  ]);
 
   const uniqueDueVocabPreview = useMemo(() => {
     if (!review) return [];
@@ -426,24 +507,37 @@ export function DailyReviewPage() {
               onSubmit={(e) => {
                 e.preventDefault();
                 const parsed = Number(customMinutesInput);
-                if (Number.isFinite(parsed) && parsed >= 5 && parsed <= 240) {
-                  updateTargetMutation.mutate(Math.round(parsed));
+                if (!Number.isFinite(parsed) || parsed < 5 || parsed > 240) {
+                  setCustomMinutesError('Vui lòng nhập mục tiêu từ 5 đến 240 phút.');
+                  return;
                 }
+                setCustomMinutesError(null);
+                updateTargetMutation.mutate(Math.round(parsed));
               }}
-              className="mt-2 flex items-center gap-2"
+              className="mt-2 space-y-1.5"
             >
-              <Input
-                type="number"
-                min={5}
-                max={240}
-                aria-label="Số phút tùy chỉnh"
-                wrapperClassName="w-24"
-                value={customMinutesInput}
-                onChange={(e) => setCustomMinutesInput(e.target.value)}
-              />
-              <Button type="submit" size="sm" variant="primary" loading={updateTargetMutation.isPending}>
-                Lưu
-              </Button>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={5}
+                  max={240}
+                  aria-label="Số phút tùy chỉnh"
+                  wrapperClassName="w-24"
+                  value={customMinutesInput}
+                  onChange={(e) => {
+                    setCustomMinutesInput(e.target.value);
+                    if (customMinutesError) setCustomMinutesError(null);
+                  }}
+                />
+                <Button type="submit" size="sm" variant="primary" loading={updateTargetMutation.isPending}>
+                  Lưu
+                </Button>
+              </div>
+              {customMinutesError && (
+                <p role="alert" className="text-[12px] text-[var(--danger-ink)]">
+                  {customMinutesError}
+                </p>
+              )}
             </form>
           )}
         </div>
@@ -764,7 +858,7 @@ export function DailyReviewPage() {
                       disabled={review.activeMistakes.length === 0}
                       loading={isCreatingMistakeSet}
                       leftIcon={<Sparkles className="h-4 w-4" aria-hidden="true" />}
-                      onClick={() => void handleCreateAndRunMistakeSet()}
+                      onClick={() => void handleCreateAndRunMistakeSet({ useFilters: false })}
                     >
                       Luyện sửa lỗi ngay
                     </Button>
@@ -807,7 +901,7 @@ export function DailyReviewPage() {
               loading={isCreatingMistakeSet}
               disabled={mistakes.filter((m) => m.status !== 'resolved').length === 0}
               leftIcon={<Sparkles className="h-4 w-4" aria-hidden="true" />}
-              onClick={() => void handleCreateAndRunMistakeSet()}
+              onClick={() => void handleCreateAndRunMistakeSet({ useFilters: true })}
             >
               Tạo bộ luyện tập từ lỗi sai
             </Button>
@@ -1024,7 +1118,7 @@ export function DailyReviewPage() {
         title={editingMistake ? 'Chỉnh sửa mục lỗi sai' : 'Ghi nhận lỗi sai mới'}
         description="Lưu lại câu viết/nói sai và cách diễn đạt tự nhiên để ôn sửa lại."
         size="lg"
-        dirty={Boolean(formOriginal.trim() || formCorrected.trim())}
+        dirty={isMistakeModalDirty}
         footer={
           <>
             <Button variant="secondary" onClick={() => setMistakeModalOpen(false)}>
@@ -1077,10 +1171,7 @@ export function DailyReviewPage() {
               value={formVocabId}
               onChange={(e) => setFormVocabId(e.target.value)}
               placeholder="Không gắn"
-              options={(vocabPickerQuery.data ?? []).slice(0, 100).map((v) => ({
-                value: v.id,
-                label: v.word,
-              }))}
+              options={mistakeVocabOptions}
             />
           </div>
 

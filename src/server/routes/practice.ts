@@ -246,7 +246,7 @@ const generateVocabPracticeSchema = z.object({
   collectionId: z.string().uuid().optional(),
   sessionId: z.string().uuid().optional(),
   vocabularyIds: z.array(z.string().uuid()).optional(),
-  limit: z.number().int().min(1).max(100).default(15),
+  limit: z.number().int().min(1).max(350).default(15),
 });
 
 const practiceSessionCreateSchema = z.object({
@@ -680,7 +680,10 @@ export function createPracticeRoutes(db: AppDatabase): Hono {
       candidateVocab = parsed.vocabularyIds
         .map((id) => vocabById.get(id))
         .filter((v): v is typeof vocabulary.$inferSelect => Boolean(v));
-    } else if (parsed.source === 'collection' && parsed.collectionId) {
+    } else if (parsed.source === 'collection') {
+      if (!parsed.collectionId) {
+        return c.json([]);
+      }
       const links = await db
         .select({ vocabularyId: vocabularyCollectionItems.vocabularyId })
         .from(vocabularyCollectionItems)
@@ -688,7 +691,10 @@ export function createPracticeRoutes(db: AppDatabase): Hono {
       candidateVocab = links
         .map((l) => vocabById.get(l.vocabularyId))
         .filter((v): v is typeof vocabulary.$inferSelect => Boolean(v));
-    } else if (parsed.source === 'session' && parsed.sessionId) {
+    } else if (parsed.source === 'session') {
+      if (!parsed.sessionId) {
+        return c.json([]);
+      }
       const links = await db
         .select({ vocabularyId: sessionVocabulary.vocabularyId })
         .from(sessionVocabulary)

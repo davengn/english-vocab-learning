@@ -15,11 +15,53 @@ export interface DatabaseHandle {
 }
 
 function resolveMigrationsFolder(): string {
-  const fromCwd = path.resolve(process.cwd(), 'drizzle');
-  if (fs.existsSync(fromCwd)) {
-    return fromCwd;
+  const metaDir =
+    typeof import.meta !== 'undefined' && typeof import.meta.dirname === 'string'
+      ? import.meta.dirname
+      : undefined;
+  const cjsDir = typeof __dirname !== 'undefined' ? __dirname : undefined;
+
+  const candidates = [
+    path.resolve(process.cwd(), 'drizzle'),
+    process.env.LAMBDA_TASK_ROOT ? path.resolve(process.env.LAMBDA_TASK_ROOT, 'drizzle') : '',
+    '/var/task/drizzle',
+    metaDir ? path.resolve(metaDir, '../../../drizzle') : '',
+    cjsDir ? path.resolve(cjsDir, '../../../drizzle') : '',
+    cjsDir ? path.resolve(cjsDir, '../../drizzle') : '',
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
   }
-  return path.resolve(import.meta.dirname, '../../../drizzle');
+  return path.resolve(process.cwd(), 'drizzle');
+}
+
+function resolvePgSslOption(databaseUrl: string): false | { rejectUnauthorized: boolean } | undefined {
+  try {
+    const parsed = new URL(databaseUrl);
+    const sslMode = parsed.searchParams.get('sslmode')?.toLowerCase();
+    if (sslMode === 'disable') {
+      return false;
+    }
+    if (sslMode === 'verify-ca' || sslMode === 'verify-full') {
+      return undefined;
+    }
+    const hostname = parsed.hostname.toLowerCase();
+    const isLocalHost =
+      hostname === 'localhost' ||
+      hostname === '127.0.0.1' ||
+      hostname === '::1' ||
+      hostname === 'host.docker.internal';
+
+    if (isLocalHost && sslMode !== 'require' && sslMode !== 'no-verify') {
+      return undefined;
+    }
+    return { rejectUnauthorized: false };
+  } catch {
+    return undefined;
+  }
 }
 
 export async function createDatabase(options?: {
@@ -32,7 +74,14 @@ export async function createDatabase(options?: {
   const shouldMigrate = options?.runMigrations ?? true;
 
   if (options?.databaseUrl && !options?.inMemory) {
-    const pool = new Pool({ connectionString: options.databaseUrl });
+    const ssl = resolvePgSslOption(options.databaseUrl);
+    const pool = new Pool({
+      connectionString: options.databaseUrl,
+      max: 3,
+      idleTimeoutMillis: 20_000,
+      connectionTimeoutMillis: 10_000,
+      ...(ssl !== undefined ? { ssl } : {}),
+    });
     const db = drizzlePg(pool, { schema });
     if (shouldMigrate) {
       await migratePg(db, { migrationsFolder });

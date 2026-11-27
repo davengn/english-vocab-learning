@@ -83,6 +83,13 @@ export function Dialog({
 
     if (open && !dialog.open) {
       dialog.showModal();
+      const target =
+        dialog.querySelector<HTMLElement>(
+          '[data-autofocus], [autofocus], [data-dialog-body] input:not([type="hidden"]):not([disabled]), [data-dialog-body] textarea:not([disabled]), [data-dialog-footer] button:not([disabled])',
+        );
+      if (target) {
+        requestAnimationFrame(() => target.focus());
+      }
     } else if (!open && dialog.open) {
       dialog.close();
     }
@@ -212,7 +219,7 @@ export function Dialog({
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 py-5">{children}</div>
+        <div data-dialog-body className="flex-1 overflow-y-auto px-6 py-5">{children}</div>
 
         {showDirtyConfirm ? (
           <div
@@ -244,7 +251,7 @@ export function Dialog({
         ) : null}
 
         {footer ? (
-          <div className="flex flex-wrap items-center justify-end gap-2.5 border-t border-[var(--border-hairline)] bg-[var(--bg-canvas)]/70 px-6 py-3.5">
+          <div data-dialog-footer className="flex flex-wrap items-center justify-end gap-2.5 border-t border-[var(--border-hairline)] bg-[var(--bg-canvas)]/70 px-6 py-3.5">
             {footer}
           </div>
         ) : null}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -73,19 +73,36 @@ export function GrammarPage() {
   const [createCategoryOpen, setCreateCategoryOpen] = useState(false);
   const [categoryToDelete, setCategoryToDelete] = useState<GrammarCategoryDto | null>(null);
 
-  // Sync URL query params (?new=1 and ?categoryId=...)
+  const selectCategory = useCallback(
+    (nextCategoryId: string) => {
+      setSelectedCategoryId(nextCategoryId);
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (nextCategoryId) {
+            next.set('categoryId', nextCategoryId);
+          } else {
+            next.delete('categoryId');
+          }
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  // Sync URL query params (?new=1 and ?categoryId=...) without fighting local category toggles
   useEffect(() => {
-    const urlCat = searchParams.get('categoryId');
-    if (urlCat !== null && urlCat !== selectedCategoryId) {
-      setSelectedCategoryId(urlCat);
-    }
+    const urlCat = searchParams.get('categoryId') ?? '';
+    setSelectedCategoryId((prev) => (prev === urlCat ? prev : urlCat));
     if (searchParams.get('new') === '1') {
       setCreateTopicOpen(true);
       const next = new URLSearchParams(searchParams);
       next.delete('new');
       setSearchParams(next, { replace: true });
     }
-  }, [searchParams, selectedCategoryId, setSearchParams]);
+  }, [searchParams, setSearchParams]);
 
   // Queries
   const categoriesQuery = useQuery({
@@ -142,7 +159,7 @@ export function GrammarPage() {
       setCatDesc('');
       setCatError(undefined);
       setCreateCategoryOpen(false);
-      setSelectedCategoryId(created.id);
+      selectCategory(created.id);
     },
     onError: (err) => {
       showError(
@@ -159,7 +176,7 @@ export function GrammarPage() {
       queryClient.invalidateQueries({ queryKey: ['grammar-topics'] });
       queryClient.invalidateQueries({ queryKey: ['analytics'] });
       if (selectedCategoryId === deletedId) {
-        setSelectedCategoryId('');
+        selectCategory('');
       }
       success('Đã xóa danh mục ngữ pháp');
       setCategoryToDelete(null);
@@ -374,7 +391,7 @@ export function GrammarPage() {
             <div className="space-y-1 max-h-[60vh] overflow-y-auto pr-0.5">
               <button
                 type="button"
-                onClick={() => setSelectedCategoryId('')}
+                onClick={() => selectCategory('')}
                 className={cn(
                   'flex w-full items-center justify-between rounded-[8px] px-2.5 py-2 text-left text-[13px] font-medium transition-colors cursor-pointer',
                   selectedCategoryId === ''
@@ -405,7 +422,7 @@ export function GrammarPage() {
                   >
                     <button
                       type="button"
-                      onClick={() => setSelectedCategoryId(cat.id)}
+                      onClick={() => selectCategory(cat.id)}
                       className="flex min-w-0 flex-1 items-center justify-between gap-2 px-2.5 py-2 text-left cursor-pointer"
                     >
                       <div className="min-w-0">
@@ -505,7 +522,7 @@ export function GrammarPage() {
                 size="sm"
                 variant="ghost"
                 onClick={() => {
-                  setSelectedCategoryId('');
+                  selectCategory('');
                   setSearchText('');
                   setDifficultyFilter('');
                   setCefrFilter('');

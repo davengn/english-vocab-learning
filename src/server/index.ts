@@ -14,7 +14,7 @@ async function bootstrap() {
 
   await seedDatabase(dbHandle.db);
 
-  const app = createApp(dbHandle.db);
+  const app = createApp(dbHandle.db, { driver: dbHandle.driver });
 
   const clientDistDir = path.resolve(process.cwd(), 'dist/client');
   const indexHtmlPath = path.join(clientDistDir, 'index.html');

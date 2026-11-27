@@ -53,7 +53,7 @@ export function Select({
             required={required}
             className={cn(
               getFieldControlClassName(Boolean(error)),
-              'min-h-9 appearance-none pl-3 pr-9 py-2 leading-[1.45]',
+              'min-h-9 appearance-none bg-none pl-3 pr-9 py-2 leading-[1.45]',
               className,
             )}
           >

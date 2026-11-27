@@ -89,6 +89,7 @@ export function QuickAddVocabModal({ open, onClose }: QuickAddVocabModalProps) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (mutation.isPending) return;
     setErrorMsg(null);
     setDuplicateId(null);
     if (!word.trim()) {
@@ -101,7 +102,12 @@ export function QuickAddVocabModal({ open, onClose }: QuickAddVocabModalProps) {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !isImeComposing(e)) {
       e.preventDefault();
-      if (word.trim()) mutation.mutate();
+      if (mutation.isPending) return;
+      if (!word.trim()) {
+        setErrorMsg('Vui lòng nhập từ hoặc cụm từ tiếng Anh.');
+        return;
+      }
+      mutation.mutate();
     }
   };
 

@@ -177,6 +177,16 @@ export function GrammarDetailPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
+  // Reset transient editing and modal state when navigating between topic IDs
+  useEffect(() => {
+    setIsEditing(false);
+    setDraft(null);
+    setEditError(null);
+    setDeleteDialogOpen(false);
+    setQuestionModalOpen(false);
+    setActiveSection('overview');
+  }, [id]);
+
   const topicQuery = useQuery({
     queryKey: ['grammar-topic', id],
     queryFn: () => api.getGrammarTopic(id),
@@ -245,8 +255,8 @@ export function GrammarDetailPage() {
             englishSentence: ex.englishSentence.trim(),
             vietnameseTranslation: ex.vietnameseTranslation.trim(),
             structureHighlight: ex.structureHighlight.trim(),
-            incorrectVersion: ex.incorrectVersion.trim(),
-            correctionNote: ex.correctionNote.trim(),
+            incorrectVersion: ex.isCommonMistake ? ex.incorrectVersion.trim() : '',
+            correctionNote: ex.isCommonMistake ? ex.correctionNote.trim() : '',
           })),
         comparisons: payload.comparisons
           .filter((cmp) => cmp.comparedTopicTitle.trim())
@@ -340,6 +350,35 @@ export function GrammarDetailPage() {
     );
     if (invalidMistakeRow) {
       setEditError('Vui lòng nhập câu đúng chuẩn cho mỗi mục lỗi thường gặp.');
+      return;
+    }
+    const incompleteExampleRow = draft.examples.find(
+      (ex) =>
+        !ex.englishSentence.trim() &&
+        Boolean(
+          ex.vietnameseTranslation.trim() ||
+            ex.structureHighlight.trim() ||
+            (ex.isCommonMistake && (ex.incorrectVersion.trim() || ex.correctionNote.trim())),
+        ),
+    );
+    if (incompleteExampleRow) {
+      setEditError('Vui lòng nhập câu tiếng Anh cho mỗi ví dụ đã điền nội dung (hoặc xóa dòng đó).');
+      return;
+    }
+    const incompleteComparisonRow = draft.comparisons.find(
+      (cmp) =>
+        !cmp.comparedTopicTitle.trim() &&
+        Boolean(
+          cmp.differenceVi.trim() ||
+            cmp.contextExampleA.trim() ||
+            cmp.contextExampleB.trim() ||
+            cmp.commonMistakeVi.trim(),
+        ),
+    );
+    if (incompleteComparisonRow) {
+      setEditError(
+        'Vui lòng nhập tên cấu trúc được so sánh cho mỗi bảng so sánh đã điền nội dung.',
+      );
       return;
     }
     setEditError(null);

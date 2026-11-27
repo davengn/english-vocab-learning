@@ -1817,15 +1817,20 @@ const isDirectRun =
   process.argv[1].endsWith('seed.ts');
 
 if (isDirectRun) {
-  const { createDatabase } = await import('./index.js');
-  const handle = await createDatabase({
-    databaseUrl: process.env.DATABASE_URL,
-    dataDir: process.env.DATA_DIR,
+  void (async () => {
+    const { createDatabase } = await import('./index.js');
+    const handle = await createDatabase({
+      databaseUrl: process.env.DATABASE_URL,
+      dataDir: process.env.DATA_DIR,
+    });
+    try {
+      const uid = await seedDatabase(handle.db);
+      console.log(`Seed completed successfully for user ${uid} (driver: ${handle.driver})`);
+    } finally {
+      await handle.close();
+    }
+  })().catch((err) => {
+    console.error('Seed failed:', err);
+    process.exit(1);
   });
-  try {
-    const uid = await seedDatabase(handle.db);
-    console.log(`Seed completed successfully for user ${uid} (driver: ${handle.driver})`);
-  } finally {
-    await handle.close();
-  }
 }

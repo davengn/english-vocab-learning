@@ -24,7 +24,12 @@ import {
 } from '@shared/schemas';
 import { api } from '@client/lib/api';
 import { isImeComposing, onImeSafeEnter } from '@client/lib/ime';
-import { cn } from '@client/lib/utils';
+import {
+  cn,
+  hasOpenDialog,
+  isEditableFocused,
+  isOtherInteractiveFocused,
+} from '@client/lib/utils';
 import { Badge } from '@client/components/ui/Badge';
 import { Button } from '@client/components/ui/Button';
 import { Card, CardContent } from '@client/components/ui/Card';
@@ -130,18 +135,6 @@ function formatDuration(totalSeconds: number): string {
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
-function isEditableFocused(): boolean {
-  const active = document.activeElement;
-  if (!active) return false;
-  const tag = active.tagName;
-  return (
-    tag === 'INPUT' ||
-    tag === 'TEXTAREA' ||
-    tag === 'SELECT' ||
-    (active as HTMLElement).isContentEditable
-  );
-}
-
 /**
  * Distraction-free interactive runner supporting all 8 deterministic vocabulary practice modes with SM-2 rating.
  */
@@ -176,6 +169,7 @@ export function VocabPracticeRunner({ items, mode, title, onFinish }: VocabPract
   const sessionInitRef = useRef<Promise<PracticeSessionDto> | null>(null);
   const itemStartRef = useRef<number>(Date.now());
   const sessionCompletedRef = useRef(false);
+  const cardButtonRef = useRef<HTMLDivElement | null>(null);
 
   const currentItem = items[currentIndex];
   const isMcMode = MC_MODES.has(mode) && (currentItem?.options.length ?? 0) > 1;
@@ -421,10 +415,13 @@ export function VocabPracticeRunner({ items, mode, title, onFinish }: VocabPract
     if (isFinished || !currentItem) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.isComposing || e.keyCode === 229) return;
+      if (hasOpenDialog()) return;
       if (isEditableFocused()) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
 
       if (mode === 'flashcard') {
         if (e.code === 'Space') {
+          if (isOtherInteractiveFocused(cardButtonRef.current)) return;
           e.preventDefault();
           setIsFlipped((v) => !v);
           return;
@@ -642,6 +639,7 @@ export function VocabPracticeRunner({ items, mode, title, onFinish }: VocabPract
 
               <div className="flashcard-scene">
                 <div
+                  ref={cardButtonRef}
                   role="button"
                   tabIndex={0}
                   aria-pressed={isFlipped}
@@ -650,8 +648,13 @@ export function VocabPracticeRunner({ items, mode, title, onFinish }: VocabPract
                       ? `Mặt sau thẻ ${currentItem.word}. Nhấn để lật lại`
                       : `Mặt trước thẻ ${currentItem.word}. Nhấn hoặc bấm Space để lật`
                   }
-                  onClick={() => setIsFlipped((v) => !v)}
+                  onClick={(e) => {
+                    if ((e.target as HTMLElement).closest('button, a')) return;
+                    setIsFlipped((v) => !v);
+                  }}
                   onKeyDown={(e) => {
+                    if (isImeComposing(e)) return;
+                    if (e.target !== e.currentTarget) return;
                     if (e.key === 'Enter') {
                       e.preventDefault();
                       setIsFlipped((v) => !v);

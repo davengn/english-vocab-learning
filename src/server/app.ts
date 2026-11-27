@@ -11,13 +11,18 @@ import { createReviewRoutes } from './routes/review.js';
 import { createMistakesRoutes } from './routes/mistakes.js';
 import { createAnalyticsRoutes } from './routes/analytics.js';
 
-export function createApp(db: AppDatabase): Hono {
+export interface CreateAppOptions {
+  driver?: 'pglite' | 'pg';
+}
+
+export function createApp(db: AppDatabase, options?: CreateAppOptions): Hono {
   const app = new Hono();
 
   app.get('/api/health', (c) => {
     return c.json({
       ok: true,
       status: 'healthy',
+      ...(options?.driver ? { driver: options.driver } : {}),
       timestamp: new Date().toISOString(),
     });
   });

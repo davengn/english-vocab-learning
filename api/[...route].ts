@@ -19,7 +19,7 @@ function getAppContext(): Promise<AppContext> {
         dataDir: process.env.DATA_DIR ?? '/tmp/pgdata',
       });
       await seedDatabase(dbHandle.db);
-      const app = createApp(dbHandle.db);
+      const app = createApp(dbHandle.db, { driver: dbHandle.driver });
       return { app, dbHandle };
     })().catch((err) => {
       cachedContextPromise = null;

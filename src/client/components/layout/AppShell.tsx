@@ -15,7 +15,7 @@ import {
   Plus,
   Search,
 } from 'lucide-react';
-import { cn } from '../../lib/utils';
+import { cn, hasOpenDialog } from '../../lib/utils';
 import { Button } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
 
@@ -50,6 +50,7 @@ export function AppShell({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        if (hasOpenDialog()) return;
         e.preventDefault();
         onOpenCommandPalette();
       }

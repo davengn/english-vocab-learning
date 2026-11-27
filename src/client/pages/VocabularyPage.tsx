@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertCircle,
@@ -125,6 +125,21 @@ export function VocabularyPage({ onOpenQuickAddVocab }: VocabularyPageProps) {
   const [viewMode, setViewMode] = useState<'flashcard' | 'table'>(() =>
     searchParams.get('view') === 'table' ? 'table' : 'flashcard',
   );
+  const prevSearchParamsRef = useRef<string>(searchParams.toString());
+
+  // Sync URL query params when navigated externally (e.g. collection/tag/search links)
+  useEffect(() => {
+    const currentQs = searchParams.toString();
+    if (currentQs === prevSearchParamsRef.current) return;
+    prevSearchParamsRef.current = currentQs;
+
+    const urlSearch = searchParams.get('search') ?? '';
+    setSearchInput(urlSearch);
+    setDebouncedSearch(urlSearch.trim());
+    setSelectedCollectionId(searchParams.get('collectionId') ?? '');
+    setSelectedTagId(searchParams.get('tagId') ?? '');
+    setViewMode(searchParams.get('view') === 'table' ? 'table' : 'flashcard');
+  }, [searchParams]);
 
   const handleChangeViewMode = (nextMode: 'flashcard' | 'table') => {
     setViewMode(nextMode);
@@ -134,6 +149,7 @@ export function VocabularyPage({ onOpenQuickAddVocab }: VocabularyPageProps) {
     } else {
       next.set('view', 'table');
     }
+    prevSearchParamsRef.current = next.toString();
     setSearchParams(next, { replace: true });
   };
 
@@ -208,10 +224,11 @@ export function VocabularyPage({ onOpenQuickAddVocab }: VocabularyPageProps) {
     [collectionsQuery.data],
   );
 
-  // Export URL matching current filters
+  // Export URL matching current filters (uses live searchInput so immediate CSV click stays in sync)
   const exportCsvUrl = useMemo(() => {
     const sp = new URLSearchParams();
-    if (debouncedSearch) sp.set('search', debouncedSearch);
+    const effectiveSearch = searchInput.trim();
+    if (effectiveSearch) sp.set('search', effectiveSearch);
     if (selectedCollectionId) sp.set('collectionId', selectedCollectionId);
     if (selectedTagId) sp.set('tagId', selectedTagId);
     if (cefrFilter) sp.set('cefrLevel', cefrFilter);
@@ -222,7 +239,7 @@ export function VocabularyPage({ onOpenQuickAddVocab }: VocabularyPageProps) {
     const qs = sp.toString();
     return `/api/vocabulary/export.csv${qs ? `?${qs}` : ''}`;
   }, [
-    debouncedSearch,
+    searchInput,
     selectedCollectionId,
     selectedTagId,
     cefrFilter,
@@ -338,6 +355,7 @@ export function VocabularyPage({ onOpenQuickAddVocab }: VocabularyPageProps) {
     setIncompleteOnly(false);
     setSortBy('newest');
     if (searchParams.toString()) {
+      prevSearchParamsRef.current = '';
       setSearchParams({});
     }
   };
