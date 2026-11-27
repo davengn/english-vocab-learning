@@ -1,0 +1,279 @@
+@import "tailwindcss";
+
+:root {
+  --bg-canvas: #FAF9F6;
+  --bg-surface: #FFFFFF;
+  --bg-subtle: #F3F1EC;
+  --bg-hover: #ECE9E2;
+
+  --border-hairline: #E7E5E0;
+  --border-strong: #D6D3CD;
+
+  --ink-primary: #1C1917;
+  --ink-secondary: #57534E;
+  --ink-muted: #78716C;
+
+  --accent: #0F766E;
+  --accent-hover: #115E59;
+  --accent-soft: #F0FDFA;
+  --accent-border: #99F6E4;
+
+  --success-ink: #15803D;
+  --success-soft: #F0FDF4;
+  --success-border: #BBF7D0;
+
+  --warning-ink: #B45309;
+  --warning-soft: #FFFBEB;
+  --warning-border: #FDE68A;
+
+  --danger-ink: #B91C1C;
+  --danger-soft: #FEF2F2;
+  --danger-border: #FECACA;
+
+  --info-ink: #0369A1;
+  --info-soft: #F0F9FF;
+  --info-border: #BAE6FD;
+
+  --font-sans: 'Inter', 'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-ipa: 'Noto Sans', 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    color: var(--ink-primary);
+    background-color: var(--bg-canvas);
+  }
+
+  body {
+    font-family: var(--font-sans);
+    line-height: 1.55;
+    background-color: var(--bg-canvas);
+    color: var(--ink-primary);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  select {
+    -webkit-appearance: none;
+    appearance: none;
+  }
+}
+
+.ipa {
+  font-family: var(--font-ipa);
+}
+
+.formula {
+  font-family: var(--font-mono);
+}
+
+.visually-hidden:where(:not(:focus-within, :active)) {
+  position: absolute !important;
+  clip-path: inset(50%) !important;
+  overflow: hidden !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  white-space: nowrap !important;
+}
+
+/* Native <dialog> modal scrolling containment and backdrop */
+dialog:modal {
+  margin: auto;
+  overscroll-behavior: contain;
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100dvh - 2rem);
+}
+
+dialog::backdrop {
+  background: rgba(28, 25, 23, 0.35);
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+
+dialog[open] {
+  opacity: 1;
+}
+
+@starting-style {
+  dialog[open] {
+    opacity: 0;
+  }
+
+  dialog[open]::backdrop {
+    background: rgba(28, 25, 23, 0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  dialog[open] {
+    transition: opacity 0.16s ease-out;
+  }
+
+  dialog[open]::backdrop {
+    transition: background-color 0.16s ease-out;
+  }
+}
+
+/* Accessible Tabs indicator via border pseudo-element (Forced Colors safe) */
+[role="tab"] {
+  position: relative;
+}
+
+[role="tab"][aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  border-block-end: 2px solid var(--accent);
+}
+
+/* Toast top-layer popover positioning */
+.toast-region[popover] {
+  inset: auto 1rem 1rem auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  overflow: visible;
+  max-width: calc(100vw - 2rem);
+}
+
+/* Semantic responsive data tables */
+.responsive-table-wrapper {
+  overflow: auto;
+  max-inline-size: 100%;
+  container-type: inline-size;
+}
+
+.responsive-table-wrapper table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.responsive-table-wrapper thead {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 2;
+}
+
+.responsive-table-wrapper tbody th {
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: 1;
+}
+
+@container (width < 640px) {
+  .responsive-table-wrapper {
+    border: 0;
+    background: transparent;
+  }
+
+  .responsive-table-wrapper table,
+  .responsive-table-wrapper thead,
+  .responsive-table-wrapper tbody,
+  .responsive-table-wrapper tr,
+  .responsive-table-wrapper th,
+  .responsive-table-wrapper td {
+    display: block;
+  }
+
+  .responsive-table-wrapper thead {
+    display: none;
+  }
+
+  .responsive-table-wrapper tbody tr {
+    margin-block-end: 0.75rem;
+    border: 1px solid var(--border-hairline);
+    border-radius: 8px;
+    background: var(--bg-surface);
+    padding: 0.75rem;
+  }
+
+  .responsive-table-wrapper tbody tr:last-child {
+    margin-block-end: 0;
+  }
+
+  .responsive-table-wrapper tbody th {
+    position: sticky;
+    inset-block-start: 0;
+    z-index: 2;
+    background: var(--bg-subtle);
+    border-radius: 6px;
+    border-bottom: 0;
+    padding: 0.5rem 0.625rem;
+    margin-bottom: 0.5rem;
+    text-align: left;
+  }
+
+  .responsive-table-wrapper tbody td {
+    border-bottom: 1px solid var(--border-hairline);
+    padding: 0.45rem 0.125rem;
+    text-align: left;
+  }
+
+  .responsive-table-wrapper tbody td:last-child {
+    border-bottom: 0;
+    padding-bottom: 0.125rem;
+  }
+
+  .responsive-table-wrapper tbody td[data-label] {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+    text-align: right;
+  }
+
+  .responsive-table-wrapper tbody td[data-label]::before {
+    content: attr(data-label);
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--ink-muted);
+    text-align: left;
+    flex-shrink: 0;
+  }
+}
+
+/* Quizlet-style 3D vertical (X-axis) flashcard flip */
+.flashcard-scene {
+  perspective: 1200px;
+}
+
+.flashcard-card {
+  position: relative;
+  width: 100%;
+  transform-style: preserve-3d;
+  transition: transform 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+  display: grid;
+}
+
+.flashcard-card.is-flipped {
+  transform: rotateX(180deg);
+}
+
+.flashcard-face {
+  grid-area: 1 / 1;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.flashcard-face-back {
+  transform: rotateX(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flashcard-card {
+    transition: none;
+  }
+}

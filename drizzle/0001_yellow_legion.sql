@@ -1,0 +1,1 @@
+ALTER TYPE "public"."practice_question_type" ADD VALUE 'phrase_conjugation' BEFORE 'vi_to_en';
