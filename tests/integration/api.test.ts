@@ -9,6 +9,7 @@ import { seedDatabase } from '../../src/server/db/seed.js';
 import { parseBulkVocabulary } from '../../src/shared/bulkParser.js';
 import { todayIsoDate } from '../../src/shared/schemas.js';
 import type {
+  AuthStatusDto,
   BulkSessionVocabResponseDto,
   DailyReviewDto,
   DashboardAnalyticsDto,
@@ -37,12 +38,50 @@ interface TestContext {
 }
 
 const openHandles: DatabaseHandle[] = [];
+const appSessionCookies = new WeakMap<Hono, string>();
 
-async function setupInMemoryContext(): Promise<TestContext> {
+const TEST_AUTH = {
+  username: 'testuser',
+  displayName: 'Test Learner',
+  password: 'test-only-password-!23',
+  secret: 'integration-test-session-secret',
+};
+
+function extractSessionCookie(setCookieHeader: string | null): string {
+  if (!setCookieHeader) {
+    throw new Error('Expected Set-Cookie header on login response');
+  }
+  const pair = setCookieHeader.split(';')[0]?.trim();
+  if (!pair) {
+    throw new Error('Malformed Set-Cookie header');
+  }
+  return pair;
+}
+
+async function loginAndGetCookie(
+  app: Hono,
+  credentials = { username: TEST_AUTH.username, password: TEST_AUTH.password },
+): Promise<string> {
+  const loginRes = await app.request('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(credentials),
+  });
+  if (loginRes.status !== 200) {
+    throw new Error(`Expected login 200, got ${loginRes.status}`);
+  }
+  return extractSessionCookie(loginRes.headers.get('set-cookie'));
+}
+
+async function setupInMemoryContext(options?: { skipLogin?: boolean }): Promise<TestContext> {
   const handle = await createDatabase({ inMemory: true });
   openHandles.push(handle);
   await seedDatabase(handle.db);
-  const app = createApp(handle.db);
+  const app = createApp(handle.db, { auth: TEST_AUTH });
+  if (!options?.skipLogin) {
+    const cookie = await loginAndGetCookie(app);
+    appSessionCookies.set(app, cookie);
+  }
   return { handle, app };
 }
 
@@ -61,14 +100,28 @@ async function requestJson<T>(
   options?: {
     method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
     body?: unknown;
+    cookie?: string;
+    unauthenticated?: boolean;
   },
 ): Promise<{ status: number; data: T }> {
   const method = options?.method ?? 'GET';
+  const headers: Record<string, string> = {};
+  const sessionCookie = options?.unauthenticated
+    ? undefined
+    : (options?.cookie ?? appSessionCookies.get(app));
+  if (sessionCookie) {
+    headers.Cookie = sessionCookie;
+  }
+
   const init: RequestInit = { method };
   if (options?.body !== undefined) {
-    init.headers = { 'Content-Type': 'application/json' };
+    headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(options.body);
   }
+  if (Object.keys(headers).length > 0) {
+    init.headers = headers;
+  }
+
   const response = await app.request(urlPath, init);
   const data = (await response.json()) as T;
   return { status: response.status, data };
@@ -988,6 +1041,7 @@ describe('English Learning OS V1 — End-to-End API & Persistence Integration Te
 
       const parseRes = await app.request('/api/vocabulary/import/parse', {
         method: 'POST',
+        headers: { Cookie: appSessionCookies.get(app)! },
         body: formData,
       });
       expect(parseRes.status).toBe(200);
@@ -1029,7 +1083,9 @@ describe('English Learning OS V1 — End-to-End API & Persistence Integration Te
       expect(commitRes.data.skippedCount).toBe(1);
 
       // Export CSV and verify raw UTF-8 BOM + Vietnamese diacritics
-      const exportRes = await app.request('/api/vocabulary/export.csv');
+      const exportRes = await app.request('/api/vocabulary/export.csv', {
+        headers: { Cookie: appSessionCookies.get(app)! },
+      });
       expect(exportRes.status).toBe(200);
       expect(exportRes.headers.get('Content-Type')).toContain('text/csv');
 
@@ -1062,7 +1118,9 @@ describe('English Learning OS V1 — End-to-End API & Persistence Integration Te
       try {
         handle1 = await createDatabase({ dataDir });
         await seedDatabase(handle1.db);
-        const app1 = createApp(handle1.db);
+        const app1 = createApp(handle1.db, { auth: TEST_AUTH });
+        const app1Cookie = await loginAndGetCookie(app1);
+        appSessionCookies.set(app1, app1Cookie);
 
         // 1. Create custom vocabulary word 'ephemeral_persist_test'
         const vocabRes = await requestJson<VocabularyDetailDto>(app1, '/api/vocabulary', {
@@ -1154,7 +1212,8 @@ describe('English Learning OS V1 — End-to-End API & Persistence Integration Te
 
         // Reopen brand new database instance pointing to exact same dataDir
         handle2 = await createDatabase({ dataDir });
-        const app2 = createApp(handle2.db);
+        const app2 = createApp(handle2.db, { auth: TEST_AUTH });
+        appSessionCookies.set(app2, app1Cookie);
 
         // Assert custom session is intact with linked word
         const reopenedSessionRes = await requestJson<SessionDetailDto>(
@@ -1293,6 +1352,7 @@ describe('English Learning OS V1 — End-to-End API & Persistence Integration Te
     // 1. Combined filters: collection + tag + cefr + pos + status + favorite + search
     const filteredCsvRes = await app.request(
       `/api/vocabulary/export.csv?collectionId=${colRes.data.id}&tagId=${tagRes.data.id}&cefrLevel=C1&partOfSpeech=verb&status=learning&favorite=true&search=m%E1%BA%A1ch%20l%E1%BA%A1c`,
+      { headers: { Cookie: appSessionCookies.get(app)! } },
     );
     expect(filteredCsvRes.status).toBe(200);
     expect(filteredCsvRes.headers.get('content-type')).toContain('text/csv');
@@ -1308,6 +1368,7 @@ describe('English Learning OS V1 — End-to-End API & Persistence Integration Te
     // 2. Incomplete filter
     const incompleteCsvRes = await app.request(
       '/api/vocabulary/export.csv?incomplete=true&search=ephemeral_csv_incomplete',
+      { headers: { Cookie: appSessionCookies.get(app)! } },
     );
     expect(incompleteCsvRes.status).toBe(200);
     const incompleteCsvText = await incompleteCsvRes.text();
@@ -1447,13 +1508,20 @@ describe('English Learning OS V1 — End-to-End API & Persistence Integration Te
   });
 
   it(
-    'serves health (with driver), multipart CSV import, and BOM CSV export via Vercel and Netlify serverless entrypoints',
+    'serves health (with driver), enforces auth on protected routes, multipart CSV import, and BOM CSV export via Vercel and Netlify serverless entrypoints',
     async () => {
       const prevDataDir = process.env.DATA_DIR;
+      const prevAuthUser = process.env.AUTH_USERNAME;
+      const prevAuthPass = process.env.AUTH_PASSWORD;
+      const prevAuthSecret = process.env.AUTH_SECRET;
       const tmpVercelDir = fs.mkdtempSync(path.join(os.tmpdir(), 'eng-os-vercel-'));
       const tmpNetlifyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'eng-os-netlify-'));
 
       try {
+        process.env.AUTH_USERNAME = TEST_AUTH.username;
+        process.env.AUTH_PASSWORD = TEST_AUTH.password;
+        process.env.AUTH_SECRET = TEST_AUTH.secret;
+
         // Test Vercel entrypoint
         process.env.DATA_DIR = path.join(tmpVercelDir, 'pgdata');
         const vercelEntry = await import('../../api/[...route].js');
@@ -1470,8 +1538,28 @@ describe('English Learning OS V1 — End-to-End API & Persistence Integration Te
         expect(vercelHealth.status).toBe('healthy');
         expect(vercelHealth.driver).toBe('pglite');
 
-        const vercelCsvRes = await vercelEntry.GET(
+        const vercelUnauthRes = await vercelEntry.GET(
           new Request('http://localhost/api/vocabulary/export.csv'),
+        );
+        expect(vercelUnauthRes.status).toBe(401);
+
+        const vercelLoginRes = await vercelEntry.POST(
+          new Request('http://localhost/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username: TEST_AUTH.username,
+              password: TEST_AUTH.password,
+            }),
+          }),
+        );
+        expect(vercelLoginRes.status).toBe(200);
+        const vercelCookie = extractSessionCookie(vercelLoginRes.headers.get('set-cookie'));
+
+        const vercelCsvRes = await vercelEntry.GET(
+          new Request('http://localhost/api/vocabulary/export.csv', {
+            headers: { Cookie: vercelCookie },
+          }),
         );
         expect(vercelCsvRes.status).toBe(200);
         expect(vercelCsvRes.headers.get('content-type')).toContain('text/csv');
@@ -1498,6 +1586,19 @@ describe('English Learning OS V1 — End-to-End API & Persistence Integration Te
         expect(netlifyHealth.status).toBe('healthy');
         expect(netlifyHealth.driver).toBe('pglite');
 
+        const netlifyLoginRes = await netlifyEntry.default(
+          new Request('http://localhost/.netlify/functions/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username: TEST_AUTH.username,
+              password: TEST_AUTH.password,
+            }),
+          }),
+        );
+        expect(netlifyLoginRes.status).toBe(200);
+        const netlifyCookie = extractSessionCookie(netlifyLoginRes.headers.get('set-cookie'));
+
         const formData = new FormData();
         const csvBlob = new Blob(
           ['word,vietnamese_meaning,cefr_level\nmeticulous,tỉ mỉ,C1\n'],
@@ -1508,6 +1609,7 @@ describe('English Learning OS V1 — End-to-End API & Persistence Integration Te
         const netlifyImportRes = await netlifyEntry.default(
           new Request('http://localhost/.netlify/functions/api/vocabulary/import/parse', {
             method: 'POST',
+            headers: { Cookie: netlifyCookie },
             body: formData,
           }),
         );
@@ -1516,15 +1618,125 @@ describe('English Learning OS V1 — End-to-End API & Persistence Integration Te
         expect(parsedImport.totalRows).toBe(1);
         expect(parsedImport.previewRows[0].word).toBe('meticulous');
       } finally {
-        if (prevDataDir === undefined) {
-          delete process.env.DATA_DIR;
-        } else {
-          process.env.DATA_DIR = prevDataDir;
-        }
+        if (prevDataDir === undefined) delete process.env.DATA_DIR;
+        else process.env.DATA_DIR = prevDataDir;
+        if (prevAuthUser === undefined) delete process.env.AUTH_USERNAME;
+        else process.env.AUTH_USERNAME = prevAuthUser;
+        if (prevAuthPass === undefined) delete process.env.AUTH_PASSWORD;
+        else process.env.AUTH_PASSWORD = prevAuthPass;
+        if (prevAuthSecret === undefined) delete process.env.AUTH_SECRET;
+        else process.env.AUTH_SECRET = prevAuthSecret;
+
         fs.rmSync(tmpVercelDir, { recursive: true, force: true });
         fs.rmSync(tmpNetlifyDir, { recursive: true, force: true });
       }
     },
     30_000,
   );
+
+  it('Scenario 12 — Authentication, Cookie Session, Logout & Brute-Force Protection', async () => {
+    const { app } = await setupInMemoryContext({ skipLogin: true });
+
+    // 1. Public endpoints remain accessible without authentication
+    const healthRes = await app.request('/api/health');
+    expect(healthRes.status).toBe(200);
+
+    const meUnauth = await requestJson<AuthStatusDto>(app, '/api/auth/me', {
+      unauthenticated: true,
+    });
+    expect(meUnauth.status).toBe(200);
+    expect(meUnauth.data).toEqual({ authenticated: false, user: null });
+
+    // 2. All protected API routes reject unauthenticated requests with 401
+    for (const [method, urlPath] of [
+      ['GET', '/api/vocabulary'],
+      ['GET', '/api/sessions'],
+      ['GET', '/api/analytics/dashboard'],
+      ['GET', '/api/vocabulary/export.csv'],
+      ['POST', '/api/sessions'],
+    ] as const) {
+      const blockedRes = await app.request(urlPath, { method });
+      expect(blockedRes.status).toBe(401);
+    }
+
+    // 3. Forged session cookie is rejected
+    const forgedRes = await app.request('/api/vocabulary', {
+      headers: { Cookie: 'elos_session=forged.signature' },
+    });
+    expect(forgedRes.status).toBe(401);
+
+    // 4. Wrong username or wrong password returns identical generic 401 message
+    const wrongPassRes = await requestJson<{ error: string }>(app, '/api/auth/login', {
+      method: 'POST',
+      unauthenticated: true,
+      body: { username: TEST_AUTH.username, password: 'wrong-password' },
+    });
+    expect(wrongPassRes.status).toBe(401);
+
+    const wrongUserRes = await requestJson<{ error: string }>(app, '/api/auth/login', {
+      method: 'POST',
+      unauthenticated: true,
+      body: { username: 'unknown-user', password: TEST_AUTH.password },
+    });
+    expect(wrongUserRes.status).toBe(401);
+    expect(wrongUserRes.data.error).toBe(wrongPassRes.data.error);
+
+    // 5. Valid login returns HttpOnly cookie and unlocks /api/auth/me + protected routes
+    const loginRes = await app.request('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: `  ${TEST_AUTH.username.toUpperCase()} `,
+        password: TEST_AUTH.password,
+      }),
+    });
+    expect(loginRes.status).toBe(200);
+    const setCookieHeader = loginRes.headers.get('set-cookie') ?? '';
+    expect(setCookieHeader).toContain('elos_session=');
+    expect(setCookieHeader).toContain('HttpOnly');
+    expect(setCookieHeader).toContain('SameSite=Lax');
+    const cookie = extractSessionCookie(setCookieHeader);
+
+    const meAuthed = await requestJson<AuthStatusDto>(app, '/api/auth/me', { cookie });
+    expect(meAuthed.status).toBe(200);
+    expect(meAuthed.data.authenticated).toBe(true);
+    expect(meAuthed.data.user?.username).toBe(TEST_AUTH.username);
+
+    const vocabAuthed = await requestJson<VocabularyListItemDto[]>(app, '/api/vocabulary', {
+      cookie,
+    });
+    expect(vocabAuthed.status).toBe(200);
+    expect(vocabAuthed.data.length).toBe(12);
+
+    // 6. Logout clears session cookie
+    const logoutRes = await app.request('/api/auth/logout', {
+      method: 'POST',
+      headers: { Cookie: cookie },
+    });
+    expect(logoutRes.status).toBe(200);
+    expect(logoutRes.headers.get('set-cookie')).toContain('Max-Age=0');
+
+    // 7. Rate limiter locks after 10 consecutive failed attempts per IP
+    for (let i = 0; i < 10; i += 1) {
+      const failRes = await app.request('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-forwarded-for': '203.0.113.77',
+        },
+        body: JSON.stringify({ username: TEST_AUTH.username, password: 'bad' }),
+      });
+      expect(failRes.status).toBe(401);
+    }
+
+    const rateLimitedRes = await app.request('/api/auth/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-forwarded-for': '203.0.113.77',
+      },
+      body: JSON.stringify({ username: TEST_AUTH.username, password: TEST_AUTH.password }),
+    });
+    expect(rateLimitedRes.status).toBe(429);
+  });
 });

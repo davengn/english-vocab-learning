@@ -39,6 +39,20 @@ export interface ApiErrorResponse {
 }
 
 // ============================================================================
+// Authentication
+// ============================================================================
+
+export interface AuthUserDto {
+  username: string;
+  name: string;
+}
+
+export interface AuthStatusDto {
+  authenticated: boolean;
+  user: AuthUserDto | null;
+}
+
+// ============================================================================
 // Settings
 // ============================================================================
 

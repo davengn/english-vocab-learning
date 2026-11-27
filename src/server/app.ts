@@ -2,6 +2,14 @@ import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { ZodError } from 'zod';
 import type { AppDatabase } from './db/index.js';
+import {
+  SESSION_COOKIE_NAME,
+  parseCookieHeader,
+  resolveAuthConfig,
+  verifySessionToken,
+  type AuthOptions,
+} from './lib/auth.js';
+import { createAuthRoutes } from './routes/auth.js';
 import { createSettingsRoutes } from './routes/settings.js';
 import { createSessionsRoutes } from './routes/sessions.js';
 import { createVocabularyRoutes } from './routes/vocabulary.js';
@@ -13,10 +21,12 @@ import { createAnalyticsRoutes } from './routes/analytics.js';
 
 export interface CreateAppOptions {
   driver?: 'pglite' | 'pg';
+  auth?: AuthOptions;
 }
 
 export function createApp(db: AppDatabase, options?: CreateAppOptions): Hono {
   const app = new Hono();
+  const authConfig = resolveAuthConfig(options?.auth);
 
   app.get('/api/health', (c) => {
     return c.json({
@@ -25,6 +35,24 @@ export function createApp(db: AppDatabase, options?: CreateAppOptions): Hono {
       ...(options?.driver ? { driver: options.driver } : {}),
       timestamp: new Date().toISOString(),
     });
+  });
+
+  app.route('/api', createAuthRoutes(authConfig));
+
+  app.use('/api/*', async (c, next) => {
+    const reqPath = c.req.path;
+    if (reqPath === '/api/health' || reqPath.startsWith('/api/auth/')) {
+      await next();
+      return;
+    }
+
+    const token = parseCookieHeader(c.req.header('cookie'), SESSION_COOKIE_NAME);
+    const payload = verifySessionToken(token, authConfig.secret);
+    if (!payload || payload.u.toLowerCase() !== authConfig.username.toLowerCase()) {
+      return c.json({ error: 'Vui lòng đăng nhập để tiếp tục' }, 401);
+    }
+
+    await next();
   });
 
   app.route('/api', createSettingsRoutes(db));

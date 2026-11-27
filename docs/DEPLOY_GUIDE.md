@@ -30,11 +30,12 @@
    - **Output Directory:** `dist/client`
 4. Tạm bấm **Deploy** (hoặc tạo DB trước ở Bước 2 rồi Redeploy).
 
-### Bước 2: Gắn PostgreSQL miễn phí All-in-One ngay trong Vercel
+### Bước 2: Gắn PostgreSQL miễn phí All-in-One & Biến bảo mật ngay trong Vercel
 1. Trong Project vừa tạo trên Vercel, mở tab **Storage** → **Create Database** → chọn **Neon** (*Serverless Postgres*, gói Free).
 2. Đặt tên database (ví dụ `english-learning-os`) → chọn Region gần nhất (Singapore `ap-southeast-1`) → bấm **Create**.
 3. Bấm **Connect Project** để Vercel tự bơm biến `DATABASE_URL` vào Environment Variables (`Production`, `Preview`, `Development`).
-4. Vào tab **Deployments** → chọn bản deploy mới nhất → bấm **⋮ → Redeploy** để áp dụng `DATABASE_URL`.
+4. Vào **Settings → Environment Variables**, thêm biến `AUTH_SECRET` là một chuỗi ngẫu nhiên dài (ví dụ chạy `openssl rand -hex 32` trên máy cá nhân để lấy chuỗi) để ký cookie đăng nhập an toàn tuyệt đối. *(Tùy chọn: có thể thêm `AUTH_USERNAME` / `AUTH_PASSWORD_HASH` nếu muốn đổi tài khoản mặc định.)*
+5. Vào tab **Deployments** → chọn bản deploy mới nhất → bấm **⋮ → Redeploy** để áp dụng cấu hình mới.
 
 *(Hoặc nếu dùng PostgreSQL bên ngoài như Supabase / Neon tự tạo: vào **Settings → Environment Variables**, thêm `DATABASE_URL = postgresql://...` rồi Redeploy.)*
 
@@ -59,14 +60,15 @@ vercel --prod
    - **Publish directory:** `dist/client`
    - **Functions directory:** `netlify/functions`
 
-### Bước 2: Gắn PostgreSQL miễn phí (`DATABASE_URL`)
-Bạn có 2 cách nhanh:
+### Bước 2: Gắn PostgreSQL miễn phí (`DATABASE_URL`) & `AUTH_SECRET`
+Bạn có 2 cách nhanh cho DB:
 - **Cách A — Dùng Netlify DB (All-in-One):** Trong dashboard site Netlify, mở mục **Netlify DB / Extensions → Neon** để khởi tạo Postgres miễn phí gắn thẳng vào site.
 - **Cách B — Dùng Neon / Supabase miễn phí:**
   1. Tạo project miễn phí tại https://neon.tech (chọn region Singapore) và copy chuỗi kết nối `postgres://...?sslmode=require`.
   2. Trên Netlify, vào **Site configuration → Environment variables → Add a variable**:
      - **Key:** `DATABASE_URL`
      - **Value:** `<chuỗi kết nối Neon/Supabase>`
+3. Đồng thời thêm biến môi trường `AUTH_SECRET` (chuỗi ngẫu nhiên dài 32+ ký tự, ví dụ từ `openssl rand -hex 32`) để ký session cookie đăng nhập.
 4. Mở tab **Deploys → Trigger deploy → Clear cache and deploy site**.
 
 ### Deploy bằng Netlify CLI (tùy chọn)
@@ -84,7 +86,10 @@ netlify deploy --prod
 
 Sau khi nhận được URL production (ví dụ `https://<site>.vercel.app` hoặc `https://<site>.netlify.app`), hãy kiểm tra nhanh 4 điểm sau:
 
-1. Mở `https://<domain>/api/health` → trả về `{"status":"ok","driver":"pg"}` (chú ý `driver` là `"pg"` nghĩa là đã kết nối thành công tới PostgreSQL thật!).
-2. Mở `/vocabulary` → thấy bộ thẻ **Flashcard kiểu Quizlet** kèm 12 từ mẫu.
-3. Mở `/grammar` → nhóm **Các thì trong tiếng Anh** có đủ **12 thì**, và mục **Luyện tập → Luyện Ngữ pháp** có đủ **11 dạng bài** (bao gồm **Ghép cụm từ & Chia thì thành câu**).
-4. Tạo thử 1 buổi học hoặc thêm 1 từ mới rồi **F5 tải lại trang** → dữ liệu vẫn còn nguyên.
+1. Mở `https://<domain>/api/health` → trả về `{"ok":true,"status":"healthy","driver":"pg",...}` (chú ý `driver` là `"pg"` nghĩa là đã kết nối thành công tới PostgreSQL thật!).
+2. Truy cập trang chủ `https://<domain>/` → hiển thị màn hình **Đăng nhập hệ thống**; thử đăng nhập bằng tài khoản cá nhân đã cấu hình.
+3. Mở `/vocabulary` → thấy bộ thẻ **Flashcard kiểu Quizlet** kèm 12 từ mẫu.
+4. Mở `/grammar` → nhóm **Các thì trong tiếng Anh** có đủ **12 thì**, và mục **Luyện tập → Luyện Ngữ pháp** có đủ **11 dạng bài** (bao gồm **Ghép cụm từ & Chia thì thành câu**).
+5. Tạo thử 1 buổi học hoặc thêm 1 từ mới rồi **F5 tải lại trang** → phiên đăng nhập và dữ liệu vẫn còn nguyên.
+
+> **Mẹo bảo mật thêm:** Bạn cũng có thể chuyển repository GitHub `davengn/english-vocab-learning` sang **Private** (Settings → Danger Zone → Change repository visibility) để hạn chế người lạ xem mã nguồn.

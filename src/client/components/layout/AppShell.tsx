@@ -9,12 +9,15 @@ import {
   Dumbbell,
   GraduationCap,
   Home,
+  LogOut,
   Menu,
   NotebookPen,
   Play,
   Plus,
   Search,
+  User,
 } from 'lucide-react';
+import type { AuthUserDto } from '../../../shared/apiTypes';
 import { cn, hasOpenDialog } from '../../lib/utils';
 import { Button } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
@@ -22,6 +25,9 @@ import { Dialog } from '../ui/Dialog';
 interface AppShellProps {
   children: React.ReactNode;
   dueCount?: number;
+  currentUser?: AuthUserDto | null;
+  onLogout?: () => void;
+  isLoggingOut?: boolean;
   onOpenQuickAddVocab: () => void;
   onOpenCreateSession: () => void;
   onOpenCommandPalette: () => void;
@@ -40,6 +46,9 @@ const NAV_ITEMS = [
 export function AppShell({
   children,
   dueCount = 0,
+  currentUser,
+  onLogout,
+  isLoggingOut = false,
   onOpenQuickAddVocab,
   onOpenCreateSession,
   onOpenCommandPalette,
@@ -181,6 +190,38 @@ export function AppShell({
           Tạo buổi học mới
         </Button>
       </div>
+
+      {currentUser ? (
+        <div className="flex items-center justify-between gap-2 border-t border-[var(--border-hairline)] px-3 py-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
+              <User className="h-3.5 w-3.5" aria-hidden="true" />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-xs font-medium text-[var(--ink-primary)]">
+                {currentUser.username}
+              </p>
+              <p className="truncate text-[10px] text-[var(--ink-muted)]">Tài khoản cá nhân</p>
+            </div>
+          </div>
+          {onLogout ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              loading={isLoggingOut}
+              onClick={() => {
+                onNavigate?.();
+                onLogout();
+              }}
+              className="shrink-0 px-2 text-xs text-[var(--ink-secondary)] hover:text-[var(--danger-ink)]"
+              title="Đăng xuất khỏi hệ thống"
+            >
+              <LogOut className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>Đăng xuất</span>
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 

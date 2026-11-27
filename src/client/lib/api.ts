@@ -1,5 +1,6 @@
 import type {
   ApiErrorResponse,
+  AuthStatusDto,
   BulkSessionVocabResponseDto,
   CollectionDto,
   DailyReviewDto,
@@ -70,6 +71,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   const res = await fetch(`/api${path}`, {
     ...init,
+    credentials: 'same-origin',
     headers: {
       ...headers,
       ...(init?.headers as Record<string, string> | undefined),
@@ -83,6 +85,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       // ignore non-JSON body
     }
+    if (res.status === 401 && !path.startsWith('/auth/') && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('elos:unauthorized'));
+    }
     throw new ApiError(
       payload?.error || `Lỗi máy chủ (${res.status})`,
       res.status,
@@ -95,6 +100,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  // Authentication
+  getAuthMe: () => request<AuthStatusDto>('/auth/me'),
+  login: (body: { username: string; password: string }) =>
+    request<AuthStatusDto>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  logout: () =>
+    request<AuthStatusDto>('/auth/logout', {
+      method: 'POST',
+    }),
+
   // Settings
   getSettings: () => request<SettingsDto>('/settings'),
   updateSettings: (body: {
