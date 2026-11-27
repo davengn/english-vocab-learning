@@ -1524,7 +1524,7 @@ describe('English Learning OS V1 — End-to-End API & Persistence Integration Te
 
         // Test Vercel entrypoint
         process.env.DATA_DIR = path.join(tmpVercelDir, 'pgdata');
-        const vercelEntry = await import('../../api/[...route].js');
+        const vercelEntry = await import('../../api/index.js');
         const vercelHealthRes = await vercelEntry.GET(
           new Request('http://localhost/api/health'),
         );

@@ -10,7 +10,7 @@
 |---|---|---|
 | **Chi phí** | Miễn phí (Hobby plan + Neon Free) | Miễn phí (Starter plan + Netlify DB / Neon Free) |
 | **Quản lý All-in-One** | Rất gọn: tạo DB ngay trong tab **Storage** của project Vercel, tự gắn `DATABASE_URL` | Rất gọn: hỗ trợ **Netlify DB** hoặc gắn `DATABASE_URL` từ Neon/Supabase |
-| **File cấu hình sẵn** | `vercel.json` + `api/[...route].ts` | `netlify.toml` + `netlify/functions/api.ts` |
+| **File cấu hình sẵn** | `vercel.json` + `api/index.ts` | `netlify.toml` + `netlify/functions/api.ts` |
 | **Gói build** | `pnpm build` (tự động) | `pnpm build` (tự động) |
 | **Độ trễ / Trải nghiệm** | Cold start nhanh, CDN toàn cầu | Cold start nhanh, CDN toàn cầu |
 | **Khuyên dùng** | **Ưu tiên #1** nếu muốn 1-click DB + Deploy nhanh nhất | Tốt ngang nhau nếu bạn quen hệ sinh thái Netlify |

@@ -43,7 +43,7 @@ DATABASE_URL=postgresql://learner:learner_password@localhost:5432/english_learni
 
 ## Triển khai miễn phí All-in-One (Vercel & Netlify)
 
-Xem hướng dẫn từng bước chi tiết cho cả hai nền tảng tại **[docs/DEPLOY_GUIDE.md](docs/DEPLOY_GUIDE.md)** (tương thích sẵn với `vercel.json` + `api/[...route].ts` và `netlify.toml` + `netlify/functions/api.ts`).
+Xem hướng dẫn từng bước chi tiết cho cả hai nền tảng tại **[docs/DEPLOY_GUIDE.md](docs/DEPLOY_GUIDE.md)** (tương thích sẵn với `vercel.json` + `api/index.ts` và `netlify.toml` + `netlify/functions/api.ts`).
 
 ---
 
